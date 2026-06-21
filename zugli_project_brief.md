@@ -293,7 +293,7 @@ when stored credentials fail to connect.
 ### 5.3 Design for the setup page — **delivered**
 
 A brand-consistent setup page has been designed and is delivered alongside this brief as
-**`designs/zuegli_setup_page.html`** — a self-contained mockup (inline CSS/JS, mock data) in the
+**`designs/zugli_setup_page.html`** — a self-contained mockup (inline CSS/JS, mock data) in the
 Zügli identity (tokens from §4.1, Archivo, dark bg, copper accent). It mirrors the config
 page's language: H1 "Zügli" wordmark, an H2 "Which network?" step, a cream network list
 styled like the config page's autocomplete dropdown (each row shows SSID + lock + signal
@@ -528,7 +528,7 @@ is purely a software behaviour.)
 Everything below is decided — build to these, no further confirmation needed.
 
 - ✅ **Name → Zügli.** (§0)
-- ✅ **Captive-portal page → designed and delivered** as `designs/zuegli_setup_page.html`. (§5.3)
+- ✅ **Captive-portal page → designed and delivered** as `designs/zugli_setup_page.html`. (§5.3)
 - ✅ **Display content → next 3 departures** of the saved connection; the on-panel *visual
   layout* stays a placeholder for now, to be refined on real hardware. (§7.7)
 - ✅ **(1) Panel build → single native 64×64 HUB75E panel.** Configure `esp-hub75` for one
@@ -574,7 +574,7 @@ Everything below is decided — build to these, no further confirmation needed.
 
 ```
 zugli/
-├─ zuegli_project_brief.md      # this brief, in the project root
+├─ zugli_project_brief.md      # this brief, in the project root
 ├─ README.md                    # keep updated (see below)
 ├─ .gitignore                   # the agent must create this (see below)
 ├─ designs/                     # design assets
@@ -585,7 +585,7 @@ zugli/
 │   ├─ UC1__First-time_WiFi_setup.svg
 │   ├─ UC2__Configure_stop___line.svg
 │   ├─ UC3__Reset_saved_WiFi.svg
-│   └─ zuegli_setup_page.html   # captive-portal setup page (also the impl. starting point)
+│   └─ zugli_setup_page.html   # captive-portal setup page (also the impl. starting point)
 ├─ web/                         # the served config index.html (Phase 2) lives here
 └─ firmware/                    # the Rust no_std firmware crate
 ```
@@ -632,7 +632,7 @@ All design assets live in the **`designs/`** folder of the repo. This brief live
 | `designs/UC1__First-time_WiFi_setup.svg` | 1 | Captive-portal provisioning flow |
 | `designs/UC2__Configure_stop___line.svg` | 2 | Stop/line configuration flow |
 | `designs/UC3__Reset_saved_WiFi.svg` | 3 | BOOT-button WiFi reset flow |
-| `designs/zuegli_setup_page.html` | 1 | Captive-portal WiFi setup page — interactive mockup in the Zügli brand, all states (network list / password / connecting / wrong-password / success). Doubles as the implementation starting point. |
+| `designs/zugli_setup_page.html` | 1 | Captive-portal WiFi setup page — interactive mockup in the Zügli brand, all states (network list / password / connecting / wrong-password / success). Doubles as the implementation starting point. |
 
 *Note: text in the design SVGs is outlined (converted to paths), so the typeface (Archivo)
 and copy are documented above rather than extractable from the files.*
