@@ -83,6 +83,11 @@ poll one endpoint) and offloads all the heavy JSON/autocomplete work to the phon
 has far more RAM. `transport.opendata.ch` has CORS enabled and needs no API key, so a
 plain `fetch()` from the served page works.
 
+**Config stays live:** Phases 2 and 3 are not sequential states the device leaves behind —
+once on the home network, the config page remains served at `zugli.local` for the entire
+time the device runs, so the user can re-pick their stop/line whenever they want without a
+reset. "Phase 3" just means a selection now also exists and is being displayed.
+
 > **Mixed-content note:** the page is served over **HTTP** from the ESP, and it calls the
 > API over **HTTPS**. That direction is allowed by browsers (HTTPS subresource on an HTTP
 > page). The reverse would be blocked. No issue here.
@@ -98,7 +103,7 @@ appears.
 | Component | Detail |
 |---|---|
 | MCU | **ESP32-S3-DevKitC** (N16R8: 16 MB flash, 8 MB PSRAM), dual-core 240 MHz, 2.4 GHz WiFi only |
-| Display | **64×64 HUB75** RGB panel (P3). **Confirm the exact build** — a single native 64×64 panel (1/32-scan, HUB75E) vs. two 64×32 panels stacked to 64×64; the two differ in scan/chain config (see §3.2) |
+| Display | **Single native 64×64 HUB75E** RGB panel (P3), 1/32-scan, address lines A–E (see §3.2) |
 | Power | 5 V / 5 A PSU into the panel(s) (not via USB); **common ground** between ESP32 and panel is mandatory |
 | Logic levels | ESP32 is 3.3 V, HUB75 wants 5 V logic → a **74HCT245 level shifter is recommended** (try without first; add if flicker/colour glitches) |
 | Reset button | On-board **BOOT button = GPIO0**; usable as a normal input after boot (used for WiFi reset, UC3) |
@@ -115,27 +120,24 @@ Note: a **64×64** panel is **1/32-scan** and **uses all five address lines A–
 → 32 scan rows, each driving 2 of the 64 rows). The E line (GPIO3 above) is therefore
 **required** here — make sure it's wired to the panel's E pin (the "E" in HUB75**E**).
 
-### 3.2 Panel build / chaining (confirm which you have)
+### 3.2 Panel build (settled: single native 64×64)
 
-The firmware targets a single **64×64** framebuffer. Two ways to get there, and they
-configure differently — **confirm which applies**:
-
-- **Single native 64×64 HUB75E panel** — straightforward: one 1/32-scan panel, A–E used,
-  framebuffer = 64×64. *(Recommended; simplest.)*
-- **Two 64×32 panels arranged as 64×64** — note that chaining two 64×32 panels with the
-  ribbon cable physically produces **128×32**, not 64×64. Presenting that as a 64×64
-  image requires a panel-mapping/virtual-display configuration in the driver. If this is
-  the build, flag it — the `esp-hub75` setup (rows/cols + scan) must be configured
-  accordingly, and it's more fiddly than a native 64×64.
+The display is a **single native 64×64 HUB75E panel** (1/32-scan). The firmware drives one
+64×64 framebuffer directly — all five address lines A–E are used, no panel-mapping or
+virtual-display config, no chaining. (For reference, chaining two 64×32 panels would
+physically produce 128×32, not 64×64, and would need extra remapping — that is **not** this
+build.)
 
 ### 3.3 mDNS / how the user reaches the page
 
-After joining home WiFi the device should advertise mDNS so the user can browse to a
-name instead of hunting for an IP. **Use an ASCII hostname** — `zugli.local` — because
-the `ü` in "Zügli" would require punycode (`xn--zgly-…`) in mDNS and is unreliable across
-phones. If mDNS proves flaky on the user's network, fall back to instructing them to use
-the device IP (the firmware should log/serve it). The captive portal's success screen
-should tell the user the exact URL to open.
+After joining home WiFi the device should advertise mDNS (via the **`edge-mdns`** crate) so
+the user can browse to a name instead of hunting for an IP. **Use an ASCII hostname** —
+`zugli.local` — because the `ü` in "Zügli" would require punycode (`xn--zgly-…`) in mDNS and
+is unreliable across phones. Because mDNS can be flaky on some phones/networks, the device
+also **renders its current IP (and `zugli.local`) on the LED panel whenever it has joined
+WiFi but has no connection selected yet** (see §7.7) — that is how the user discovers the
+fallback address. The captive-portal success screen tells the user to try `zugli.local`
+first and to check the device's screen for its IP if that fails.
 
 ---
 
@@ -199,10 +201,12 @@ Layout is a single centered column, generous spacing, left-aligned content, dark
 - Below it, a list of connection rows on dark surface (`--surface`). Each row =
   **[line badge] → [destination]**. Examples from the mockup: `2 → Klausplatz`,
   `2 → Schlieren`, `S123 → Brugg`, `S123 → Rapperswil-Jona`.
-- **Badge styling depends on transport type:**
-  - **Tram / bus** (short numeric lines like `2`): **filled** accent badge, dark text.
-  - **S-Bahn / train** (lines like `S123`): **outlined** accent badge, accent text.
-  - (Derive from the API `category` field — see §6.)
+- **Badge styling depends on the API `category` field:**
+  - **Filled** accent badge, dark text → **tram & bus**: categories `T`, `B` (and tram/bus
+    variants like `NFT`/`NFB` if present).
+  - **Outlined** accent badge, accent text → **rail**: everything else (`S`, `R`, `RE`,
+    `IR`, `IC`, `ICE`, `EC`, …).
+  - Rule of thumb: if it runs on rails between towns it's outlined; local tram/bus is filled.
 - The arrow `→` and destination text are cream/white.
 
 **State 4 — Connection selected** (`connection_selected`)
@@ -230,8 +234,9 @@ runs an animation while everything is sent") requires it. Implement:
 
 ### 4.4 What the page POSTs to the device
 
-When the user taps Save, POST a **small JSON body** to the ESP — only the final
-selection, nothing more:
+When the user taps Save, POST a **small JSON body** to the device at the **relative path
+`/save`** (same origin — the page is served by the device, so no host/IP needed) — only the
+final selection, nothing more:
 
 ```
 POST /save   (Content-Type: application/json)
@@ -244,9 +249,13 @@ POST /save   (Content-Type: application/json)
 }
 ```
 
-The device stores these fields and replies `200 OK` (e.g. `{"ok":true}`). The
-combination **(stopId + line + destination)** is the unique key the firmware filters on
-at runtime.
+The device stores these fields and replies `200 OK` (e.g. `{"ok":true}`). The combination
+**(stopId + line + destination)** is the unique key the firmware filters on at runtime
+(exact string match on `number` and `to`).
+
+**On save the device switches live — no reboot.** It persists the selection, then
+immediately (re)starts the poll → display cycle with the new connection. The user does not
+need to power-cycle; the panel updates within one poll interval.
 
 ### 4.5 Page logic summary (for the implementer)
 
@@ -265,9 +274,8 @@ when stored credentials fail to connect.
 
 ### 5.1 Flow (from UC1 diagram, name corrected to Zügli)
 
-1. Power on, no WiFi saved → device starts **SoftAP** broadcasting **`Zügli-Setup`**
-   (open network, or WPA2 with a printed/known password — open is simpler for a school
-   project; confirm preference).
+1. Power on, no WiFi saved → device starts **SoftAP** broadcasting **`Zügli-Setup`** as an
+   **open network** (no password).
 2. User connects their phone to that hotspot.
 3. A **captive portal** auto-opens (the OS connectivity check is redirected to the
    device's page). If it doesn't auto-open, the user can browse to `http://192.168.4.1`.
@@ -276,19 +284,25 @@ when stored credentials fail to connect.
 6. Device attempts to join.
    - **Wrong credentials → show an error and return to step 4** (loop, per the diagram).
    - **Success → save credentials to NVS flash, reboot into STA mode (Phase 2).**
-7. After reboot the device joins home WiFi and serves the config page. The portal's
-   success screen should tell the user to reconnect their phone to their **home** WiFi and
-   open **`http://zugli.local`** (there is no seamless cross-network auto-redirect — the
-   user changes networks manually).
+7. After reboot the device joins home WiFi and serves the config page. The portal's success
+   screen tells the user to reconnect their phone to their **home** WiFi and open
+   **`http://zugli.local`** (there is no seamless cross-network auto-redirect — the user
+   changes networks manually). If `zugli.local` doesn't resolve, the device shows its IP on
+   its own LED panel (§7.7), which the user can type instead.
 
-### 5.2 Captive portal mechanics (three services on the SoftAP)
+### 5.2 Captive portal mechanics (four services on the SoftAP)
 
 - **Access Point** at `192.168.4.1`.
-- **DNS catch-all**: a tiny UDP DNS server on port 53 that answers *every* query with
-  `192.168.4.1`, so the phone's captivity check resolves to the device. Also handle the
-  common probe paths (`/generate_204`, `/hotspot-detect.html`, `/ncsi.txt`, etc.) by
-  returning the portal so iOS/Android/Windows all pop the portal.
-- **HTTP server** serving the WiFi-setup page and accepting the submitted credentials.
+- **DHCP server** (`edge-dhcp`): hands the connecting phone an IP in the `192.168.4.x`
+  range. Required — without it the phone never gets an address and the portal can't load.
+  (Note: embassy-net's `dhcpv4` feature is the DHCP *client* used in STA mode; it does
+  **not** serve addresses in AP mode.)
+- **DNS catch-all** (`edge-captive` or a tiny custom UDP responder): answers *every* query
+  with `192.168.4.1`, so the phone's captivity check resolves to the device. Also handle
+  the common probe paths (`/generate_204`, `/hotspot-detect.html`, `/ncsi.txt`, etc.) by
+  returning the portal so iOS/Android/Windows all pop it open.
+- **HTTP server** (`picoserve`) serving the WiFi-setup page and accepting the submitted
+  credentials.
 
 ### 5.3 Design for the setup page — **delivered**
 
@@ -362,7 +376,10 @@ time when available, else the scheduled time** — i.e. prefer `stop.prognosis.d
 Because these are absolute Unix times, **no timezone math is needed** — just compare
 against the current Unix time. The firmware gets `now_unix` from SNTP (§7.4). *(Note:
 `prognosis.departure` is an ISO datetime; `departureTimestamp` is epoch seconds — normalise
-both to epoch seconds before subtracting.)*
+both to epoch seconds before subtracting. If parsing the ISO offset datetime is awkward in
+`no_std`, it's acceptable for the firmware to fall back to the scheduled `departureTimestamp`
+— decision §8-6 explicitly allows "else scheduled". The phone preview has `Date`/`Intl`
+available and should use the real-time value.)*
 
 ---
 
@@ -380,11 +397,13 @@ exact use (ESP32-S3, WiFi + HUB75 together).**
 | HAL | **`esp-hal`** | no_std HAL for ESP32-S3 |
 | Async runtime | **`embassy-executor`** + **`embassy-time`** | dual-core friendly |
 | WiFi driver | **`esp-wifi`** (a.k.a. `esp-radio` in newest releases) | STA **and** SoftAP modes |
-| TCP/IP stack | **`embassy-net`** (+ `smoltcp`) | needs `tcp`, `udp`, `dns`, `dhcpv4` features |
+| TCP/IP stack | **`embassy-net`** (+ `smoltcp`) | needs `tcp`, `udp`, `dns`, `dhcpv4` features (`dhcpv4` = DHCP **client**, STA mode only) |
 | HTTP server (config + portal) | **`picoserve`** | async no_std HTTP server, embassy-native |
 | HTTP client (API poll) | **`reqwless`** | no_std HTTP/HTTPS client |
-| TLS (for HTTPS API) | **`embedded-tls`** *or* **`esp-mbedtls`** | see §7.5 — this is the main TLS decision |
-| Captive DNS | small custom UDP responder *or* an `edge-captive`-style helper | answer every query with `192.168.4.1` |
+| TLS (for HTTPS API) | **`embedded-tls`** | settled (§7.5) — `TlsVerify::None` |
+| DHCP **server** (Phase 1 AP) | **`edge-dhcp`** (edge-net) | hands the phone a `192.168.4.x` address in SoftAP mode — embassy-net's `dhcpv4` does **not** do this |
+| Captive DNS (Phase 1 AP) | **`edge-captive`** (edge-net), or a tiny custom UDP responder | answer every query with `192.168.4.1` so the portal pops |
+| mDNS responder (Phase 2/3 STA) | **`edge-mdns`** (edge-net) | makes `zugli.local` resolve on the home network |
 | Display driver | **`esp-hub75`** (liebman) | DMA HUB75 driver, **built on embedded-graphics** |
 | Graphics | **`embedded-graphics` 0.8** | primitives + text |
 | Fonts | **`u8g2-fonts`** (optional) | nicer/larger fonts than the built-in mono fonts |
@@ -417,8 +436,11 @@ on the other (see §7.6):
 1. **`net_task`** — runs the `embassy-net` stack.
 2. **`provisioning_task`** (Phase 1 only) — SoftAP + DNS catch-all + `picoserve` setup
    page; on valid creds, persist + reboot.
-3. **`config_server_task`** (Phase 2) — `picoserve` serving `index.html` + `POST /save`;
-   on save, persist selection.
+3. **`config_server_task`** (Phase 2 **and stays running through Phase 3**) — `picoserve`
+   serving `index.html` + `POST /save`. **The config page remains reachable at
+   `zugli.local` the whole time the device is operating**, so the user can change the stop/
+   line at any point without a WiFi reset. On save, persist the selection and signal the
+   poll/render tasks to switch to the new connection **live (no reboot)**.
 4. **`poll_task`** (Phase 3) — every **30 s**: `reqwless` GET the stationboard for the
    saved `stopId`, filter to `(line, destination)`, keep the **next 3** by departure time,
    compute minutes for each, push the result (up to 3 entries) into a shared state cell
@@ -433,21 +455,16 @@ on the other (see §7.6):
 After joining WiFi, sync time once via **SNTP** (`sntpc`) and refresh periodically. The
 poll task uses this Unix time to compute `minutes = (departureTimestamp − now)/60`.
 
-### 7.5 TLS decision (the one real choice to make)
+### 7.5 TLS (settled: `embedded-tls`)
 
-The API is **HTTPS-only**, so the firmware needs TLS for its outbound poll. Two options,
-both work with `reqwless`:
+The API is **HTTPS-only**, so the firmware needs TLS for its outbound poll. Per decision
+§8-4, use **`embedded-tls`** (pure Rust, on crates.io, simplest to wire up via `reqwless`)
+with **`TlsVerify::None`** — certificate verification isn't supported in `no_std`, which is
+acceptable for a home device on a trusted network. **Document this in the README.**
 
-- **`embedded-tls`** — pure Rust, released on crates.io, simplest to wire up.
-  **Caveat:** certificate verification is *not supported* in no_std, so you run with
-  `TlsVerify::None`. Acceptable for a hobby/school device on a trusted network; document it.
-- **`esp-mbedtls`** — Espressif's mbedTLS wrapper with **hardware acceleration** and real
-  cert verification, but it's a **git dependency** (not yet on crates.io) and needs
-  `alloc`. More setup, more robust.
-
-**Recommendation:** start with **`embedded-tls` + `TlsVerify::None`** to get end-to-end
-working, then optionally harden to `esp-mbedtls` later. (If TLS proves painful, a fallback
-is a tiny relay, but that defeats the "no backend" goal — avoid unless necessary.)
+Future hardening (optional, not now): `esp-mbedtls` adds hardware-accelerated TLS with real
+cert verification, but it's a git dependency (not on crates.io) and needs `alloc`. Leave it
+as a possible later step.
 
 ### 7.6 ⚠️ Primary implementation risk: WiFi + HUB75 DMA together
 
@@ -497,7 +514,7 @@ Departure { line: "2", category: "T", destination: "Schlieren", minutes: 11 }
 | No matching departure on the board | one row: `2 Schlieren --` (or "no service") |
 | API unreachable / poll failed | keep last values briefly, then a subtle "offline" indicator; retry next cycle |
 | WiFi lost | reconnect attempts; small disconnected glyph; if creds invalid, fall to Phase 1 |
-| Booting / no selection yet | a "Zügli" splash or "Open zugli.local to set up" hint |
+| Booting / no selection yet | **show the device address on the panel**: `zugli.local` and the current IP (e.g. `192.168.1.42`), so the user knows where to configure it. This is the primary way the IP fallback is discovered. |
 
 Colour: render text in the accent copper (`#B87648`) on black to mirror the design. On an
 RGB panel set the accent as an explicit `Rgb888`/`Rgb565` value — do **not** rely on a
@@ -510,8 +527,11 @@ Store two records in flash so they survive reboots and are managed independently
 - **WiFi credentials** — written in Phase 1; **cleared by UC3** (BOOT 3 s hold).
 - **Connection selection** — the `/save` payload from §4.4; written in Phase 2.
 
-On boot: if WiFi creds exist → try STA (Phase 2/3); else → Phase 1. If a selection exists →
-start polling/rendering; else → idle splash prompting setup.
+On boot: if WiFi creds exist → join home WiFi (STA). Once on the network, the
+`config_server_task` and mDNS responder come up and **stay up** (config page always
+reachable at `zugli.local`). If a connection selection exists → start polling/rendering
+immediately; if not → show the idle screen prompting setup (and showing the address, §7.7).
+If no WiFi creds exist → Phase 1 captive portal.
 
 ### 7.9 BOOT-button WiFi reset (UC3)
 
@@ -535,9 +555,12 @@ Everything below is decided — build to these, no further confirmation needed.
   1/32-scan 64×64 panel (address lines A–E, E required). No virtual-panel remapping. (§3.1–3.2)
 - ✅ **(2) Setup hotspot → open network** (no password). `Zügli-Setup` is open; users tap to
   join. (§5.1)
-- ✅ **(3) Device address → `zugli.local` (mDNS), with the raw IP shown as a fallback.** The
-  firmware must also display/log its IP, and the setup success screen should show both the
-  `zugli.local` name and the IP, in case `.local` is flaky on the user's network. (§3.3, §5.1)
+- ✅ **(3) Device address → `zugli.local` (mDNS), with the raw IP as a fallback.** Because
+  the device only gets its home-network IP *after* it joins (i.e. after it has left the
+  captive portal), the IP can't be shown on the setup success screen. Instead, **the device
+  renders `zugli.local` and its IP on the LED panel** whenever it's joined WiFi but has no
+  connection selected yet (§7.7). The captive success screen tells the user to try
+  `zugli.local` and to check the device's screen for the IP if that fails. (§3.3, §5.1, §7.7)
 - ✅ **(4) TLS → `embedded-tls` with `TlsVerify::None`** (no certificate verification) for the
   outbound API poll. Document the trade-off in the README. Hardening to `esp-mbedtls` is a
   possible future step, not required now. (§7.5)
@@ -558,10 +581,11 @@ Everything below is decided — build to these, no further confirmation needed.
    feedback, no hardware needed.)
 2. **Firmware skeleton** via `esp-generate` — WiFi STA + `picoserve` serving the
    `index.html` + `/save` writing to flash. Verify Phase 2 end-to-end.
-3. **Poll + display** — `reqwless` poll → shared state → `esp-hub75` render of one
-   connection. Tackle the WiFi+HUB75 flicker risk here (§7.6).
-4. **Provisioning** — SoftAP + DNS catch-all + setup page (Phase 1), then the boot
-   logic that chooses Phase 1 vs 2/3.
+3. **Poll + display** — `reqwless` poll → shared state (next 3 departures) → `esp-hub75`
+   placeholder render. Tackle the WiFi+HUB75 flicker risk here (§7.6). Add the mDNS
+   responder so `zugli.local` resolves, and the idle screen showing the address.
+4. **Provisioning** — SoftAP + DHCP server + DNS catch-all + setup page (Phase 1), then the
+   boot logic that chooses Phase 1 vs the always-on STA config server + display.
 5. **BOOT reset** (UC3) + all edge-case display states (§7.7).
 
 ---
@@ -615,6 +639,69 @@ provisioning works, after the BOOT reset, etc. (roughly mirroring the build orde
 Use clear, conventional commit messages (e.g. `feat: serve config page over picoserve`,
 `fix: hub75 flicker during wifi poll`, `docs: update README setup flow`). Commit working
 increments; avoid committing secrets or build artifacts (covered by `.gitignore`).
+
+---
+
+## 11. Development environment (macOS)
+
+These are the host tools needed to build, flash, and serve the project. The firmware
+targets the ESP32-S3, which is **Xtensa** architecture — so it needs a special Rust
+toolchain (a fork), not stock Rust. Because the firmware is `no_std` (and uses
+`embedded-tls`, not `esp-mbedtls`), the **full ESP-IDF C SDK is not required** — `espup`
+provides everything.
+
+**One-time setup:**
+
+```bash
+# Xcode command-line tools (git + a C compiler)
+xcode-select --install
+
+# Rust via rustup — NOT `brew install rust` (Homebrew's fixed Rust breaks the espup flow)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Xtensa toolchain for the ESP32-S3
+cargo install espup --locked
+espup install
+
+# Flasher + serial monitor, and the no_std project scaffolder
+cargo install espflash --locked
+cargo install esp-generate
+```
+
+Homebrew note: `espflash` and `cargo-binstall` are available as brew formulae
+(`brew install espflash cargo-binstall`); `espup`, `esp-generate`, and the Xtensa fork are
+**not** in Homebrew and must come from `cargo`/`espup` as above. Do not `brew install rust`.
+
+**Shell env (fish users):** `espup` writes a bash script `~/export-esp.sh` that mainly sets
+`LIBCLANG_PATH`. It uses bash `export` syntax, so **fish cannot `source` it**. For this
+project you most likely **don't need it** — the `esp` toolchain is selected automatically by
+the generated `rust-toolchain.toml`, and our `no_std` stack avoids the `bindgen`/libclang
+path. Just run `cargo build`; only if you hit an error mentioning `libclang` or
+`unknown target triple 'xtensa'` do you need to translate the `LIBCLANG_PATH` line into
+fish in `~/.config/fish/config.fish`:
+
+```fish
+set -gx LIBCLANG_PATH "$HOME/.rustup/toolchains/esp/xtensa-esp32-elf-clang/<version>/esp-clang/lib"
+```
+(copy the exact path from `cat ~/export-esp.sh`). Sanity check: `rustup toolchain list`
+should include **`esp`**, and `which cargo` should resolve in a fresh shell (if not,
+`fish_add_path $HOME/.cargo/bin`).
+
+**Build / flash / serve:**
+
+- **Firmware:** from `firmware/`, `cargo build` (or `cargo clippy`) **compiles without the
+  board attached** — useful for an agent verifying code. `cargo run` builds, flashes, and
+  opens the serial monitor in one step and **requires the ESP32-S3 connected over USB**.
+- **Board not detected:** the S3-DevKitC has two USB-C ports — try the other one; if it
+  still doesn't appear, install the Silicon Labs **CP210x** (or CH34x) macOS USB driver.
+- **Web pages:** no toolchain. Open the HTML directly, or for live API testing serve the
+  folder (`python3 -m http.server` in `web/`) and visit `localhost:8000`.
+
+**Agent assumption:** the build/flash steps above assume a **local machine with the
+ESP32-S3 attached**. A local agent (e.g. Claude Code in a terminal) can write code,
+compile-check, flash, and read the serial log. A remote/cloud agent can write and commit
+code (and compile-check if its sandbox has the toolchain) but cannot flash the physical
+board — leave on-hardware steps to the local environment.
 
 ---
 
