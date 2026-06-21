@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zügli — Setup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Production note: embed Archivo as base64 @font-face so the page renders offline when served by the ESP. CDN link used here for the mockup only. -->
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#191919;
+    --surface:#0E0C0A;
+    --accent:#B87648;
+    --selected:#2C2213;
+    --cream:#F5EFE6;
+    --muted:#5C554C;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--cream);
+    font-family:"Archivo",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    min-height:100dvh;
+  }
+  .wrap{
+    max-width:430px;
+    margin:0 auto;
+    padding:48px 28px 64px;
+  }
+  h1{
+    font-weight:700;
+    font-size:30px;
+    color:var(--accent);
+    margin:0 0 40px;
+    letter-spacing:-.01em;
+  }
+  h2{
+    font-weight:500;
+    font-size:19px;
+    color:var(--cream);
+    margin:0 0 14px;
+  }
+  .step{margin-bottom:34px;}
+  .hidden{display:none !important;}
+
+  /* selected-network field / readout (mirrors the config page's filled input) */
+  .field{
+    width:100%;
+    background:var(--cream);
+    color:var(--surface);
+    border:none;
+    border-radius:var(--radius);
+    font-family:inherit;
+    font-size:16px;
+    padding:18px 18px;
+    outline:none;
+  }
+  .field::placeholder{color:var(--muted);}
+  input.field:focus{box-shadow:0 0 0 3px var(--accent);}
+
+  /* network list — styled like the config page's autocomplete dropdown */
+  .list{
+    background:var(--cream);
+    border-radius:var(--radius);
+    overflow:hidden;
+  }
+  .net{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    width:100%;
+    text-align:left;
+    background:transparent;
+    border:none;
+    border-bottom:1px solid rgba(92,85,76,.22);
+    padding:16px 18px;
+    font-family:inherit;
+    font-size:16px;
+    color:var(--surface);
+    cursor:pointer;
+  }
+  .net:last-child{border-bottom:none;}
+  .net:hover,.net:focus-visible{background:rgba(184,118,72,.12);outline:none;}
+  .net .name{flex:1;}
+  .net .icon{flex:0 0 auto;color:var(--muted);display:flex;}
+  .scanrow{
+    display:flex;align-items:center;gap:10px;
+    padding:16px 18px;color:var(--muted);font-size:15px;
+  }
+
+  /* password block */
+  .pw-label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:14px;margin:0 0 10px;}
+  .error{
+    color:var(--accent);
+    font-size:14px;
+    margin:10px 2px 0;
+  }
+
+  /* primary button (mirrors "Save to Zügli") */
+  .btn{
+    width:100%;
+    background:var(--accent);
+    color:var(--surface);
+    border:none;
+    border-radius:var(--radius);
+    font-family:inherit;
+    font-weight:600;
+    font-size:19px;
+    padding:20px;
+    margin-top:8px;
+    cursor:pointer;
+    display:flex;align-items:center;justify-content:center;gap:12px;
+  }
+  .btn:disabled{opacity:.55;cursor:default;}
+  .btn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--cream);}
+  .link-btn{
+    background:none;border:none;color:var(--muted);
+    font-family:inherit;font-size:14px;padding:14px 2px 0;cursor:pointer;text-align:left;
+  }
+  .link-btn:hover{color:var(--cream);}
+
+  /* success panel — echoes the display-preview tone */
+  .success-card{
+    background:var(--surface);
+    border-radius:var(--radius);
+    padding:22px;
+    line-height:1.5;
+  }
+  .success-card .url{
+    color:var(--accent);
+    font-weight:600;
+  }
+  .success-card .net-name{color:var(--cream);font-weight:600;}
+
+  .spinner{
+    width:18px;height:18px;border-radius:50%;
+    border:2.5px solid color-mix(in srgb,var(--surface) 35%, transparent);
+    border-top-color:var(--surface);
+    animation:spin .7s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+  @media (prefers-reduced-motion:reduce){
+    .spinner{animation:none;}
+  }
+
+  /* --- mockup-only preview switcher (remove for production) --- */
+  .preview-bar{
+    position:fixed;left:0;right:0;bottom:0;
+    display:flex;gap:6px;justify-content:center;flex-wrap:wrap;
+    padding:10px;background:rgba(14,12,10,.92);
+    border-top:1px solid rgba(184,118,72,.3);
+    backdrop-filter:blur(6px);
+  }
+  .preview-bar span{color:var(--muted);font-size:11px;align-self:center;margin-right:4px;}
+  .preview-bar button{
+    background:transparent;border:1px solid rgba(184,118,72,.5);color:var(--cream);
+    border-radius:8px;font-family:inherit;font-size:12px;padding:6px 10px;cursor:pointer;
+  }
+  .preview-bar button.active{background:var(--accent);color:var(--surface);border-color:var(--accent);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Zügli</h1>
+
+  <!-- STEP 1: pick a network -->
+  <section id="step-network" class="step">
+    <h2>Which network?</h2>
+    <div class="list" id="netlist">
+      <!-- scanning placeholder, replaced by populate() -->
+      <div class="scanrow"><span class="spinner" style="border-color:rgba(92,85,76,.4);border-top-color:var(--muted);"></span>Looking for networks…</div>
+    </div>
+    <button class="link-btn" id="rescan">Scan again</button>
+  </section>
+
+  <!-- STEP 2: password -->
+  <section id="step-password" class="step hidden">
+    <h2>Connect to <span id="chosen-name" style="color:var(--accent)"></span></h2>
+    <p class="pw-label">
+      <svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      Network password
+    </p>
+    <input class="field" id="pw" type="password" placeholder="Enter password" autocomplete="off">
+    <p class="error hidden" id="pw-error">That password didn't work. Try again.</p>
+    <button class="btn" id="connect">Connect</button>
+    <button class="link-btn" id="back">← Choose a different network</button>
+  </section>
+
+  <!-- STEP 3: connecting -->
+  <section id="step-connecting" class="step hidden">
+    <h2>Connecting to <span id="connecting-name" style="color:var(--accent)"></span>…</h2>
+    <button class="btn" disabled><span class="spinner"></span>Connecting</button>
+  </section>
+
+  <!-- STEP 4: success -->
+  <section id="step-success" class="step hidden">
+    <h2>You're connected.</h2>
+    <div class="success-card">
+      Zügli joined <span class="net-name" id="success-name"></span>.<br><br>
+      Now reconnect this phone to your home WiFi and open
+      <span class="url">zugli.local</span> in a browser to choose what Zügli shows.
+    </div>
+  </section>
+</div>
+
+<!-- mockup-only state switcher -->
+<div class="preview-bar">
+  <span>preview:</span>
+  <button data-go="network" class="active">1 · Networks</button>
+  <button data-go="password">2 · Password</button>
+  <button data-go="error">2b · Wrong password</button>
+  <button data-go="connecting">3 · Connecting</button>
+  <button data-go="success">4 · Success</button>
+</div>
+
+<script>
+  // ---- mock data (production: populated from the ESP's AP scan) ----
+  const MOCK_NETWORKS = [
+    {ssid:"Letzistrasse 12", locked:true,  signal:3},
+    {ssid:"Swisscom-A4F2",   locked:true,  signal:3},
+    {ssid:"Sunrise_5GHz",    locked:true,  signal:2},
+    {ssid:"FRITZ!Box 7590",  locked:true,  signal:2},
+    {ssid:"GuestWiFi",       locked:false, signal:1},
+  ];
+  let chosen = null;
+
+  const steps = {
+    network:    document.getElementById('step-network'),
+    password:   document.getElementById('step-password'),
+    connecting: document.getElementById('step-connecting'),
+    success:    document.getElementById('step-success'),
+  };
+
+  function show(name){
+    Object.values(steps).forEach(s=>s.classList.add('hidden'));
+    const key = (name==='error') ? 'password' : name;
+    steps[key].classList.remove('hidden');
+    document.getElementById('pw-error').classList.toggle('hidden', name!=='error');
+    // sync preview bar
+    document.querySelectorAll('.preview-bar button').forEach(b=>
+      b.classList.toggle('active', b.dataset.go===name));
+  }
+
+  function signalIcon(level){ // 1..3 bars
+    const on = 'var(--muted)', off='rgba(92,85,76,.3)';
+    const c=i=> i<=level?on:off;
+    return `<svg width="18" height="14" viewBox="0 0 18 14" fill="none">
+      <rect x="0"  y="9" width="4" height="5"  rx="1" fill="${c(1)}"/>
+      <rect x="6"  y="5" width="4" height="9"  rx="1" fill="${c(2)}"/>
+      <rect x="12" y="0" width="4" height="14" rx="1" fill="${c(3)}"/></svg>`;
+  }
+  function lockIcon(){
+    return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
+  }
+
+  function populate(){
+    const list = document.getElementById('netlist');
+    list.innerHTML = '';
+    MOCK_NETWORKS.forEach(n=>{
+      const b = document.createElement('button');
+      b.className='net';
+      b.innerHTML = `<span class="name">${n.ssid}</span>
+                     <span class="icon">${n.locked?lockIcon():''}</span>
+                     <span class="icon">${signalIcon(n.signal)}</span>`;
+      b.onclick = ()=>pick(n);
+      list.appendChild(b);
+    });
+  }
+
+  function pick(n){
+    chosen = n;
+    document.getElementById('chosen-name').textContent = n.ssid;
+    document.getElementById('connecting-name').textContent = n.ssid;
+    document.getElementById('success-name').textContent = n.ssid;
+    document.getElementById('pw').value='';
+    document.getElementById('pw-error').classList.add('hidden');
+    show('password');
+    document.getElementById('pw').focus();
+  }
+
+  document.getElementById('rescan').onclick = ()=>{
+    const list=document.getElementById('netlist');
+    list.innerHTML='<div class="scanrow"><span class="spinner" style="border-color:rgba(92,85,76,.4);border-top-color:var(--muted);"></span>Looking for networks…</div>';
+    setTimeout(populate, 700);
+  };
+  document.getElementById('back').onclick = ()=>show('network');
+
+  document.getElementById('connect').onclick = ()=>{
+    show('connecting');
+    // MOCK: alternate success/failure so both paths are visible.
+    // Production: POST {ssid, password} to the ESP, await its connect result.
+    setTimeout(()=>{
+      const ok = document.getElementById('pw').value.length >= 8; // mock rule
+      show(ok ? 'success' : 'error');
+    }, 1400);
+  };
+
+  // preview switcher
+  document.querySelectorAll('.preview-bar button').forEach(b=>{
+    b.onclick=()=>{
+      if(b.dataset.go==='password' && !chosen) pick(MOCK_NETWORKS[0]);
+      else if(b.dataset.go==='error' && !chosen) pick(MOCK_NETWORKS[0]);
+      show(b.dataset.go);
+    };
+  });
+
+  populate();
+</script>
+</body>
+</html>
