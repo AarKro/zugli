@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Zügli">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="0%" r="90%">
+      <stop offset="0%" stop-color="#B87648" stop-opacity="0.45"/>
+      <stop offset="60%" stop-color="#B87648" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- dark brand tile -->
+  <rect width="64" height="64" rx="14" fill="#0E0C0A"/>
+  <rect width="64" height="64" rx="14" fill="url(#glow)"/>
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="13.25" fill="none"
+        stroke="#B87648" stroke-opacity="0.35" stroke-width="1.5"/>
+  <!-- copper Z wordmark, drawn as a stroke so it stays crisp at small sizes -->
+  <path d="M18 22 H46 L18 42 H46" fill="none" stroke="#B87648"
+        stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
