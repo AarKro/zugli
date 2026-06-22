@@ -90,7 +90,7 @@
 
   /* ---------- hero ---------- */
   .hero{position:relative;padding-top:clamp(56px,9vw,96px);padding-bottom:clamp(72px,11vw,128px);}
-  .hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center;}
+  .hero-grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:56px;align-items:center;}
   @media(max-width:900px){.hero-grid{grid-template-columns:1fr;gap:48px;text-align:center;}
     .hero .lead{margin-left:auto;margin-right:auto;}
     .hero-cta{justify-content:center;}}
@@ -118,7 +118,7 @@
   /* ---------- LED panel mock (the signature visual) ---------- */
   .panel-stage{display:flex;justify-content:center;align-items:center;}
   .led-panel{
-    position:relative;width:min(420px,86vw);aspect-ratio:1/1;
+    position:relative;width:min(420px,100%);aspect-ratio:1/1;
     background:#070605;border-radius:18px;
     padding:22px 20px;
     border:1px solid rgba(184,118,72,.22);
@@ -142,7 +142,7 @@
   .led-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
     color:var(--accent);text-shadow:0 0 8px rgba(184,118,72,.65);font-size:clamp(15px,4.3vw,21px);}
   .led-row .ln{font-weight:700;color:var(--accent-bright);margin-right:10px;}
-  .led-row .dest{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;letter-spacing:.02em;}
+  .led-row .dest{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;letter-spacing:.02em;}
   .led-row .min{font-weight:700;font-variant-numeric:tabular-nums;}
   .led-row.next{font-size:clamp(20px,6vw,30px);}
   .led-row.dim{opacity:.62;}
