@@ -684,7 +684,7 @@ increments; avoid committing secrets or build artifacts (covered by `.gitignore`
 
 ---
 
-## 11. Development environment (macOS)
+## 11. Development environment
 
 These are the host tools needed to build, flash, and serve the project. The firmware
 targets the ESP32-S3, which is **Xtensa** architecture — so it needs a special Rust
@@ -695,7 +695,7 @@ provides everything.
 **One-time setup:**
 
 ```bash
-# Xcode command-line tools (git + a C compiler)
+# Xcode command-line tools (git + a C compiler) -- MacOS only
 xcode-select --install
 
 # Rust via rustup — NOT `brew install rust` (Homebrew's fixed Rust breaks the espup flow)
