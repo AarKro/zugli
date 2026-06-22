@@ -695,7 +695,7 @@ provides everything.
 **One-time setup:**
 
 ```bash
-# Xcode command-line tools (git + a C compiler) -- MacOS only
+# Xcode command-line tools (git + a C compiler) -- macOS only
 xcode-select --install
 
 # Rust via rustup — NOT `brew install rust` (Homebrew's fixed Rust breaks the espup flow)
