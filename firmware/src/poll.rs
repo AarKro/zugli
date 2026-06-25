@@ -27,7 +27,9 @@ use crate::shared::{self, DISPLAY, SELECTION, SELECTION_CHANGED};
 // don't verify it, §8-4), so it stays large; the write side and body buffer are smaller.
 const TLS_READ_BUF: usize = 16 * 1024;
 const TLS_WRITE_BUF: usize = 4 * 1024;
-const HTTP_BUF: usize = 20 * 1024;
+// The stationboard JSON for limit=20 with real-time prognosis can exceed 20 KiB; give the
+// body buffer plenty of room (it lives in PSRAM).
+const HTTP_BUF: usize = 48 * 1024;
 
 #[derive(Deserialize)]
 struct Board<'a> {
@@ -128,11 +130,37 @@ async fn fetch(
     )
     .map_err(|_| ())?;
 
-    let mut req = client.request(Method::GET, url.as_str()).await.map_err(|_| ())?;
-    let resp = req.send(http_buf).await.map_err(|_| ())?;
-    let body = resp.body().read_to_end().await.map_err(|_| ())?;
+    // Each step is logged separately so a failure points at connect/TLS vs send vs body.
+    let mut req = match client.request(Method::GET, url.as_str()).await {
+        Ok(r) => r,
+        Err(e) => {
+            warn!("poll: connect/TLS failed: {e:?}");
+            return Err(());
+        }
+    };
+    let resp = match req.send(http_buf).await {
+        Ok(r) => r,
+        Err(e) => {
+            warn!("poll: send/headers failed: {e:?}");
+            return Err(());
+        }
+    };
+    let status = resp.status;
+    let body = match resp.body().read_to_end().await {
+        Ok(b) => b,
+        Err(e) => {
+            warn!("poll: body read failed (status {status:?}): {e:?}");
+            return Err(());
+        }
+    };
 
-    parse_departures(body, sel).ok_or(())
+    match parse_departures(body, sel) {
+        Some(d) => Ok(d),
+        None => {
+            warn!("poll: JSON parse failed ({} bytes)", body.len());
+            Err(())
+        }
+    }
 }
 
 /// Parse the stationboard body and build up to three departures for the saved connection.
