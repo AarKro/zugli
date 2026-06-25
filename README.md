@@ -96,14 +96,21 @@ on physical hardware, so the items below are flagged for on-device verification:
   only compiles with `der`'s `heapless` feature enabled — forced on via a direct `der`
   dependency in `Cargo.toml`. `portable-atomic` provides the 64-bit atomics the Xtensa core
   lacks. See the comments in `firmware/Cargo.toml`.
+- **TLS signature schemes.** reqwless is built with its `alloc` feature on so embedded-tls
+  advertises the `rsa_pss_rsae_*` signature schemes. The poll target serves an **RSA**
+  certificate, and TLS 1.3 requires the server's CertificateVerify to be RSA-PSS-signed;
+  without those schemes advertised the handshake aborts with `HandshakeFailure`. (The heavy
+  `rsa` crate is not pulled in — `TlsVerify::None` skips verifying the signature, so merely
+  advertising the schemes is enough for the server to complete the handshake.)
 
 ## Security note
 
 The firmware's outbound HTTPS poll uses **`embedded-tls` with certificate verification
 disabled** (`TlsVerify::None`, brief decision §8-4). `no_std` certificate verification is
 not wired up, which is an accepted trade-off for a home device on a trusted network. The
-served pages are plain HTTP on the LAN. Hardening to verified TLS (`esp-mbedtls`) is a
-possible future step. Do not treat this device as exposed to untrusted networks.
+served pages are plain HTTP on the LAN. Hardening to verified TLS (e.g. `esp-mbedtls`, which
+would also bring full certificate validation) is a possible future step. Do not treat this
+device as exposed to untrusted networks.
 
 ## Documentation
 

@@ -51,8 +51,12 @@ pub enum DisplayState {
     /// Joined WiFi but no connection selected yet: show the address so the user can
     /// reach the config page (brief §3.3 / §7.7). `octets` is the device IPv4.
     IdleAddress { octets: [u8; 4] },
-    /// Normal runtime: the next departures (may hold a single `--` entry for no service).
-    Departures(Departures),
+    /// Normal runtime: the saved stop's name plus its next departures (the `deps` vec may
+    /// hold a single `--` entry when there's no upcoming service).
+    Departures {
+        station: String<64>,
+        deps: Departures,
+    },
     /// Poll failed / network lost — subtle offline indicator (brief §7.7).
     Offline,
 }

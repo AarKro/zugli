@@ -229,6 +229,11 @@ async function selectConnection(c, row){
   $("pv-left").textContent = `${c.line} ${c.destination}`;
   $("pv-right").textContent = "…";
   $("status").classList.add("hidden");
+  // Always offer a fresh save — picking a new connection must never stay locked behind a
+  // previous "Saved ✓" state, so the user can override what's on Zügli at any time.
+  const saveBtn = $("save");
+  saveBtn.disabled = false;
+  saveBtn.textContent = "Save to Zügli";
   const mins = await nextMinutes(selectedStop.id, c.line, c.destination);
   selectedConn.minutes = mins;
   $("pv-right").textContent = mins == null ? "--" : (mins === 0 ? "now" : `${mins}'`);
@@ -277,7 +282,10 @@ $("save").addEventListener("click", async () => {
     if (!r.ok) throw new Error("bad status");
     st.textContent = "Saved — Zügli is updating.";
     st.className = "note ok";
-    btn.textContent = "Saved ✓";
+    // Re-enable so a different stop/connection can be saved over this one (no lock-in).
+    // Keep the label constant — the status line communicates success.
+    btn.disabled = false;
+    btn.textContent = "Save to Zügli";
   } catch (_) {
     st.textContent = "Couldn't reach Zügli — try again.";
     st.className = "note err";

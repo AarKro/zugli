@@ -12,7 +12,7 @@ use embassy_futures::select::{Either, select};
 use embassy_net::Stack;
 use embassy_net::dns::DnsSocket;
 use embassy_net::tcp::client::{TcpClient, TcpClientState};
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Timer, with_timeout};
 use heapless::{String, Vec};
 use log::{info, warn};
 use reqwless::client::{HttpClient, TlsConfig, TlsVerify};
@@ -27,22 +27,30 @@ use crate::shared::{self, DISPLAY, SELECTION, SELECTION_CHANGED};
 // don't verify it, §8-4), so it stays large; the write side and body buffer are smaller.
 const TLS_READ_BUF: usize = 16 * 1024;
 const TLS_WRITE_BUF: usize = 4 * 1024;
-// The stationboard JSON for limit=20 with real-time prognosis can exceed 20 KiB; give the
-// body buffer plenty of room (it lives in PSRAM).
-const HTTP_BUF: usize = 48 * 1024;
+// We request only the five fields we actually parse (see `fetch`), which shrinks the
+// stationboard response from ~100 KiB (the full payload with real-time prognosis) to ~2 KiB.
+// 16 KiB leaves generous room for headers + body (the buffer lives in PSRAM).
+const HTTP_BUF: usize = 16 * 1024;
 
+/// Hard ceiling on a single fetch (DNS + connect + TLS + request + body). Anything slower is
+/// treated as a failure so the poll loop can never wedge on a stalled connection.
+const FETCH_TIMEOUT_SECS: u64 = 15;
+
+// Owned (not borrowed) strings: the API JSON-escapes non-ASCII (e.g. `Zürich`), and
+// serde-json-core can only *decode* those escapes into an owned target via the
+// `from_slice_escaped` path below. Borrowing `&str` would keep `ü` literal, so a saved
+// destination like "Zürich, Klusplatz" would never match. Capacities mirror `Selection`.
 #[derive(Deserialize)]
-struct Board<'a> {
-    #[serde(borrow)]
-    stationboard: Vec<Entry<'a>, 24>,
+struct Board {
+    stationboard: Vec<Entry, 24>,
 }
 
 #[derive(Deserialize)]
-struct Entry<'a> {
-    category: Option<&'a str>,
-    number: Option<&'a str>,
-    name: Option<&'a str>,
-    to: Option<&'a str>,
+struct Entry {
+    category: Option<String<12>>,
+    number: Option<String<16>>,
+    name: Option<String<16>>,
+    to: Option<String<48>>,
     stop: EntryStop,
 }
 
@@ -63,42 +71,67 @@ pub async fn poll_task(stack: Stack<'static>, seed: u64) {
     let mut write_record = vec![0u8; TLS_WRITE_BUF];
     let mut http_buf = vec![0u8; HTTP_BUF];
 
+    // Don't poll until DHCP has actually configured the interface — fetching before the
+    // network is up just burns a failed attempt and flashes the offline screen on boot.
+    stack.wait_config_up().await;
+
     loop {
         let selection = SELECTION.lock().await.clone();
-        match selection {
+        // How long to wait before the next poll: the normal interval after a good poll or an
+        // idle screen, but a short retry after a failure so a transient hiccup recovers fast.
+        let delay = match selection {
             None => {
                 // No connection chosen yet: show the address screen (brief §7.7).
+                info!("poll: no selection set — showing idle screen, not polling");
                 if let Some(octets) = shared::device_ip() {
                     DISPLAY.signal(DisplayState::IdleAddress { octets });
                 }
+                crate::POLL_INTERVAL_SECS
             }
             Some(sel) => {
-                match fetch(
-                    &tcp_client,
-                    &dns,
-                    seed,
-                    &mut read_record,
-                    &mut write_record,
-                    &mut http_buf,
-                    &sel,
+                // Bound the whole fetch: reqwless/embassy-net put no timeout on DNS, the TCP
+                // connect, or the TLS handshake, so any stall would hang the poll loop
+                // forever (and, with the single-socket pool, wedge every later attempt too).
+                // On timeout the future is dropped, which frees the socket, and we retry.
+                let attempt = with_timeout(
+                    Duration::from_secs(FETCH_TIMEOUT_SECS),
+                    fetch(
+                        &tcp_client,
+                        &dns,
+                        seed,
+                        &mut read_record,
+                        &mut write_record,
+                        &mut http_buf,
+                        &sel,
+                    ),
                 )
-                .await
-                {
-                    Ok(deps) => {
+                .await;
+                match attempt {
+                    Ok(Ok(deps)) => {
                         info!("poll: {} departures", deps.len());
-                        DISPLAY.signal(DisplayState::Departures(deps));
+                        DISPLAY.signal(DisplayState::Departures {
+                            station: sel.stop_name.clone(),
+                            deps,
+                        });
+                        crate::POLL_INTERVAL_SECS
                     }
-                    Err(_) => {
+                    Ok(Err(())) => {
                         warn!("poll: fetch failed");
                         DISPLAY.signal(DisplayState::Offline);
+                        crate::POLL_RETRY_SECS
+                    }
+                    Err(_) => {
+                        warn!("poll: fetch timed out after {FETCH_TIMEOUT_SECS}s");
+                        DISPLAY.signal(DisplayState::Offline);
+                        crate::POLL_RETRY_SECS
                     }
                 }
             }
-        }
+        };
 
         // Sleep until the next interval, or wake early when the selection changes.
         match select(
-            Timer::after(Duration::from_secs(crate::POLL_INTERVAL_SECS)),
+            Timer::after(Duration::from_secs(delay)),
             SELECTION_CHANGED.wait(),
         )
         .await
@@ -122,10 +155,18 @@ async fn fetch(
     let tls = TlsConfig::new(seed, read_record, write_record, TlsVerify::None);
     let mut client = HttpClient::new_with_tls(tcp_client, dns, tls);
 
-    let mut url: String<160> = String::new();
+    // Request only the fields we parse below. Without this the full payload (real-time
+    // prognosis for every entry) is ~100 KiB; the `fields[]` filter trims it to ~2 KiB.
+    // `[]` is percent-encoded (`%5B%5D`) so reqwless's URL parser accepts it.
+    let mut url: String<320> = String::new();
     write!(
         url,
-        "https://transport.opendata.ch/v1/stationboard?id={}&limit=20",
+        "https://transport.opendata.ch/v1/stationboard?id={}&limit=20\
+         &fields%5B%5D=stationboard/number\
+         &fields%5B%5D=stationboard/name\
+         &fields%5B%5D=stationboard/category\
+         &fields%5B%5D=stationboard/to\
+         &fields%5B%5D=stationboard/stop/departureTimestamp",
         sel.stop_id.as_str()
     )
     .map_err(|_| ())?;
@@ -165,14 +206,22 @@ async fn fetch(
 
 /// Parse the stationboard body and build up to three departures for the saved connection.
 fn parse_departures(body: &[u8], sel: &Selection) -> Option<Departures> {
-    let (board, _) = serde_json_core::from_slice::<Board>(body).ok()?;
+    // Scratch space for decoding JSON `\uXXXX` escapes (e.g. `ü`); must fit the longest
+    // single unescaped string, so it tracks the largest field capacity above.
+    let mut unescape = [0u8; 64];
+    let (board, _) = serde_json_core::from_slice_escaped::<Board>(body, &mut unescape).ok()?;
     let now = shared::now_unix();
 
     // Collect matching (timestamp, entry) pairs.
     let mut matches: Vec<(i64, Departure), 24> = Vec::new();
     for e in &board.stationboard {
-        let line = e.number.or(e.name).unwrap_or("");
-        let to = e.to.unwrap_or("");
+        let line = e
+            .number
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .or(e.name.as_deref())
+            .unwrap_or("");
+        let to = e.to.as_deref().unwrap_or("");
         if line != sel.line.as_str() || to != sel.destination.as_str() {
             continue;
         }
@@ -182,7 +231,7 @@ fn parse_departures(body: &[u8], sel: &Selection) -> Option<Departures> {
         };
         let dep = Departure {
             line: str_to(line),
-            category: str_to(e.category.unwrap_or("")),
+            category: str_to(e.category.as_deref().unwrap_or("")),
             destination: str_to(to),
             minutes: now.map(|n| minutes_until(ts, n)),
         };
@@ -190,6 +239,17 @@ fn parse_departures(body: &[u8], sel: &Selection) -> Option<Departures> {
     }
 
     matches.sort_unstable_by_key(|(ts, _)| *ts);
+
+    // Diagnostic: a `--` on the panel means either the clock isn't synced (so minutes can't
+    // be computed) or nothing on the board matched the saved line/destination. This says which.
+    info!(
+        "poll: parsed {} entries, {} matched '{} → {}', clock {}",
+        board.stationboard.len(),
+        matches.len(),
+        sel.line.as_str(),
+        sel.destination.as_str(),
+        if now.is_some() { "set" } else { "UNSET" },
+    );
 
     let mut out: Departures = Vec::new();
     if matches.is_empty() {

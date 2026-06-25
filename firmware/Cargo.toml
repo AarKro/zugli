@@ -79,8 +79,14 @@ embedded-graphics  = "0.8.2"
 picoserve = { version = "0.18.0", features = ["embassy", "json", "log"] }
 
 # --- HTTP(S) client for the runtime poll (Phase 3) ---
-# default feature pulls in embedded-tls; we use TlsVerify::None (see README security note).
-reqwless            = { version = "0.14.0", default-features = false, features = ["embedded-tls", "log"] }
+# embedded-tls backend; we use TlsVerify::None (see README security note). The `alloc`
+# feature is REQUIRED: it turns on embedded-tls's `alloc` feature, which makes
+# `TlsConfig::new()` advertise the RSA-PSS signature schemes (`rsa_pss_rsae_*`). The poll
+# target transport.opendata.ch serves an RSA certificate, and TLS 1.3 requires the server's
+# CertificateVerify to be RSA-PSS-signed — without these schemes advertised the server can't
+# pick one and aborts the handshake with HandshakeFailure. (No heavy `rsa` crate is pulled
+# in: TlsVerify::None skips actually verifying the signature, so advertising is enough.)
+reqwless            = { version = "0.14.0", default-features = false, features = ["embedded-tls", "alloc", "log"] }
 # reqwless 0.14 enables embedded-tls 0.18's `rustpki` feature, which imports der's
 # `SequenceOf`/`SetOf` — gated behind der's `heapless` feature. Force that feature on so the
 # (otherwise unused, since we use TlsVerify::None) PKI module still compiles. Keep der at the

@@ -65,11 +65,17 @@ async fn save(Json(sel): Json<Selection>) -> impl IntoResponse {
         sel.line.as_str(),
         sel.destination.as_str()
     );
-    // Persist to flash (best effort), update the live selection, and wake the poll task.
+    // Persist to flash, update the live selection, and wake the poll task. Log the persist
+    // result: if this fails the selection still works this session (set in memory below) but
+    // is lost on reboot — exactly the "polling doesn't start after restart" symptom.
     {
         let mut guard = STORE.lock().await;
-        if let Some(store) = guard.as_mut() {
-            let _ = store.save_selection(&sel);
+        match guard.as_mut() {
+            Some(store) => match store.save_selection(&sel) {
+                Ok(()) => info!("save: selection persisted to flash"),
+                Err(()) => log::error!("save: FLASH SAVE FAILED (selection won't survive reboot)"),
+            },
+            None => log::error!("save: no flash store (selection won't survive reboot)"),
         }
     }
     *SELECTION.lock().await = Some(sel);

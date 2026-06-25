@@ -26,6 +26,7 @@ use esp_hal::rng::Rng;
 use esp_hal::system::Stack;
 use esp_hal::timer::timg::TimerGroup;
 use log::info;
+use static_cell::ConstStaticCell;
 
 use firmware::display::{self, Hub75Peripherals};
 use firmware::httpd::config_server_task;
@@ -95,7 +96,13 @@ async fn main(spawner: Spawner) -> ! {
             spawner.spawn(display::render_task(ex_a, ex_b, fb0).unwrap());
         });
     };
-    let app_core_stack = mk_static!(Stack<8192>, Stack::new());
+    // Generous stack for the render core: the scrolling-marquee path nests embedded-graphics
+    // text rendering for two animated headings plus the large time font every frame. Placed
+    // in static memory via ConstStaticCell — `Stack::new()` is const, so the 32 KB value is
+    // built at compile time and NOT materialised as a temporary on main's own stack (doing so
+    // bloated main's frame and overflowed its stack at boot, in `framebuffers()`).
+    static APP_CORE_STACK: ConstStaticCell<Stack<32768>> = ConstStaticCell::new(Stack::new());
+    let app_core_stack = APP_CORE_STACK.take();
     esp_rtos::start_second_core(p.CPU_CTRL, sw_ints.software_interrupt1, app_core_stack, cpu1);
 
     // --- Random seed for the network stack + TLS ---
@@ -111,6 +118,11 @@ async fn main(spawner: Spawner) -> ! {
         let mut g = STORE.lock().await;
         g.as_mut().and_then(|s| s.load_selection())
     };
+    info!(
+        "boot: loaded from flash — wifi creds {}, selection {}",
+        if creds.is_some() { "present" } else { "absent" },
+        if selection.is_some() { "present" } else { "absent" },
+    );
 
     // --- WiFi controller + interfaces ---
     let (controller, interfaces) =
