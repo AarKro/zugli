@@ -65,7 +65,7 @@ matching pin constant in the firmware — so it's easiest to wire exactly as bel
 | A | address bit 0 | **GPIO14** |
 | B | address bit 1 | **GPIO46** |
 | C | address bit 2 | **GPIO13** |
-| D | address bit 3 | **GPIO9** |
+| D (GND) | address bit 3 | **GPIO9** |
 | **E** | address bit 4 | **GPIO3** |
 | CLK | pixel clock | **GPIO12** |
 | LAT (STB) | latch | **GPIO10** |
