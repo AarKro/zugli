@@ -1,0 +1,118 @@
+[package]
+edition      = "2024"
+name         = "firmware"
+rust-version = "1.88"
+version      = "0.1.0"
+
+[[bin]]
+name = "firmware"
+path = "./src/bin/main.rs"
+
+[dependencies]
+esp-hal = { version = "~1.1.0", features = ["esp32s3", "log-04", "unstable"] }
+
+esp-rtos = { version = "0.3.0", features = [
+  "embassy",
+  "esp-alloc",
+  "esp-radio",
+  "esp32s3",
+  "log-04",
+] }
+
+esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32s3", "log-04"] }
+log                    = "0.4.27"
+
+embassy-net = { version = "0.9.1", features = [
+  "dhcpv4",
+  "dns",
+  "log",
+  "medium-ethernet",
+  "multicast",
+  "tcp",
+  "udp",
+] }
+embassy-sync    = "0.7.0"
+embassy-futures = "0.1.1"
+embedded-io = "0.7.1"
+embedded-io-async = "0.7.0"
+esp-alloc = "0.10.0"
+esp-backtrace = { version = "0.19.0", features = [
+  "esp32s3",
+  "panic-handler",
+  "println",
+] }
+esp-println = { version = "0.17.0", features = ["esp32s3", "log-04"] }
+# for more networking protocol support see https://crates.io/crates/edge-net
+embassy-executor = { version = "0.10.0", features = ["log"] }
+embassy-time = { version = "0.5.0", features = ["log"] }
+esp-radio = { version = "0.18.0", features = [
+  "esp-alloc",
+  "esp32s3",
+  "log-04",
+  "unstable",
+  "wifi",
+] }
+smoltcp = { version = "0.13.0", default-features = false, features = [
+  "log",
+  "medium-ethernet",
+  "multicast",
+  "proto-dhcpv4",
+  "proto-dns",
+  "proto-ipv4",
+  "socket-dns",
+  "socket-icmp",
+  "socket-raw",
+  "socket-tcp",
+  "socket-udp",
+] }
+
+critical-section = "1.2.0"
+static_cell      = "2.1.1"
+# 64-bit atomics with a critical-section fallback (the Xtensa ESP32-S3 lacks native i64 atomics).
+portable-atomic  = { version = "1", features = ["critical-section"] }
+
+# --- Display (HUB75 on the LCD_CAM peripheral) ---
+esp-hub75          = { version = "0.11.0", features = ["esp32s3", "log", "iram"] }
+embedded-graphics  = "0.8.2"
+
+# --- HTTP server (Phase 1 portal + Phase 2 config page) ---
+picoserve = { version = "0.18.0", features = ["embassy", "json", "log"] }
+
+# --- HTTP(S) client for the runtime poll (Phase 3) ---
+# default feature pulls in embedded-tls; we use TlsVerify::None (see README security note).
+reqwless            = { version = "0.14.0", default-features = false, features = ["embedded-tls", "log"] }
+# reqwless 0.14 enables embedded-tls 0.18's `rustpki` feature, which imports der's
+# `SequenceOf`/`SetOf` — gated behind der's `heapless` feature. Force that feature on so the
+# (otherwise unused, since we use TlsVerify::None) PKI module still compiles. Keep der at the
+# stable 0.8.0 (its `Header::tag()` is the method embedded-tls expects).
+der                 = { version = "0.8.0", default-features = false, features = ["heapless"] }
+
+# --- Captive-portal DHCP packet codec (driven over an embassy-net UDP socket) ---
+edge-dhcp = { version = "0.8.0", default-features = false }
+
+# --- Persistence (WiFi creds + connection selection in the NVS data partition) ---
+esp-storage      = { version = "0.9.0", features = ["esp32s3"] }
+embedded-storage = "0.3.1"
+
+# --- JSON: parse the /save body and the transport stationboard response ---
+serde           = { version = "1.0", default-features = false, features = ["derive"] }
+serde-json-core = "0.6.0"
+heapless        = { version = "0.8.0", features = ["serde"] }
+
+
+# For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
+[profile.dev]
+# The default debug profile is too slow and too big for resource-constrained devices.
+# Always build with some optimizations enabled.
+opt-level = "s"
+
+# esp-storage must be built with opt-level 2/3 even in debug builds, or flash
+# access timing is wrong. (See the esp-storage README.)
+[profile.dev.package.esp-storage]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1     # LLVM can perform better optimizations using a single thread
+debug         = 2     # prefer slower builds but better debugging experience
+lto           = 'fat'
+opt-level     = 's'
