@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zügli · Setup</title>
+<!--
+  Phase 1 captive-portal WiFi setup page (PROJECT_BRIEF.md §5). Served by the device's
+  SoftAP at http://192.168.4.1 while it broadcasts the open "Zügli-Setup" network.
+  Production wiring (this file): network list comes from GET /scan, Connect POSTs
+  {ssid,password} to POST /connect and awaits the device's real join result.
+  Adapted from designs/zugli_setup_page.html with the mock data + preview switcher removed.
+-->
+<style>
+  :root{
+    --bg:#191919; --surface:#0E0C0A; --accent:#B87648;
+    --selected:#2C2213; --cream:#F5EFE6; --muted:#5C554C;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;background:var(--bg);color:var(--cream);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:16px;line-height:1.4;
+    padding:32px 20px 64px;-webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:440px;margin:0 auto;}
+  h1{color:var(--accent);font-weight:700;font-size:30px;margin:0 0 28px;letter-spacing:.5px;}
+  h2{color:var(--cream);font-weight:500;font-size:19px;margin:0 0 14px;}
+  .hidden{display:none !important;}
+  .list{background:var(--cream);border-radius:12px;overflow:hidden;}
+  .list .row{
+    display:flex;align-items:center;gap:10px;padding:14px 16px;color:#1a1410;cursor:pointer;
+    border-top:1px solid #e0d8cc;
+  }
+  .list .row:first-child{border-top:none;}
+  .list .row:active{background:#ece3d6;}
+  .row .name{flex:1;}
+  .row .meta{display:flex;align-items:center;gap:6px;color:#6b6258;}
+  .bars{display:inline-flex;align-items:flex-end;gap:2px;height:14px;}
+  .bars i{width:3px;background:#b3a89a;border-radius:1px;}
+  .bars i.on{background:#1a1410;}
+  .field{
+    width:100%;background:var(--cream);color:#1a1410;border:none;border-radius:12px;
+    padding:14px 16px;font-size:16px;outline:none;margin-bottom:12px;
+  }
+  .field::placeholder{color:var(--muted);}
+  .btn{
+    width:100%;background:var(--accent);color:var(--surface);border:none;border-radius:12px;
+    padding:16px;font-size:19px;font-weight:600;cursor:pointer;min-height:44px;
+  }
+  .btn[disabled]{opacity:.6;cursor:default;}
+  .link-btn{background:none;border:none;color:var(--muted);font-size:15px;margin-top:14px;cursor:pointer;padding:6px 0;}
+  .error{color:#e08a5a;font-size:15px;margin:10px 0 0;}
+  .spin{display:inline-block;width:15px;height:15px;border:2px solid rgba(14,12,10,.4);
+    border-top-color:var(--surface);border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px;margin-right:8px;}
+  @keyframes s{to{transform:rotate(360deg);}}
+  .success{background:var(--surface);border-radius:12px;padding:18px;color:var(--cream);}
+  .success b{color:var(--accent);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Zügli</h1>
+
+  <!-- Step 1: scanned networks -->
+  <section id="step-network">
+    <h2>Which network?</h2>
+    <div class="list" id="netlist"><div class="row"><span class="name">Scanning…</span></div></div>
+    <button class="link-btn" id="rescan">Scan again</button>
+  </section>
+
+  <!-- Step 2: password -->
+  <section id="step-password" class="hidden">
+    <h2>Connect to <span id="chosen-name" style="color:var(--accent)"></span></h2>
+    <input class="field" id="pw" type="password" placeholder="Enter password" autocomplete="off">
+    <p class="error hidden" id="pw-error">That password didn't work. Try again.</p>
+    <button class="btn" id="connect">Connect</button>
+    <button class="link-btn" id="back">← Choose a different network</button>
+  </section>
+
+  <!-- Step 3: connecting -->
+  <section id="step-connecting" class="hidden">
+    <h2><span class="spin"></span>Connecting to <span id="connecting-name" style="color:var(--accent)"></span>…</h2>
+  </section>
+
+  <!-- Step 4: hand-off guidance -->
+  <section id="step-success" class="hidden">
+    <h2>Connecting to <b id="success-name"></b>…</h2>
+    <div class="success">
+      Zügli has to leave this <b>Zügli-Setup</b> hotspot to join your network, so this page
+      can't follow along. Here's what to do:<br><br>
+      <b>If it worked</b> — reconnect this phone to your <b>home WiFi</b>, then open the
+      <b>IP address shown on Zügli's screen</b> in your browser.<br><br>
+      <b>If the password was wrong</b> — the <b>Zügli-Setup</b> hotspot will come back in a
+      few seconds. Rejoin it and try again.
+    </div>
+  </section>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const steps = ["step-network","step-password","step-connecting","step-success"];
+function show(step){ steps.forEach(s => $(s).classList.toggle("hidden", s !== step)); }
+
+let chosen = null; // {ssid, secure}
+
+function bars(level){ // level 0..3
+  let h = "";
+  for (let i = 0; i < 3; i++) h += `<i class="${i < level ? "on" : ""}" style="height:${5 + i*4}px"></i>`;
+  return `<span class="bars">${h}</span>`;
+}
+function rssiToBars(rssi){ if (rssi >= -60) return 3; if (rssi >= -72) return 2; return 1; }
+
+async function scan(){
+  $("netlist").innerHTML = `<div class="row"><span class="name">Scanning…</span></div>`;
+  try {
+    const r = await fetch("/scan");
+    const nets = await r.json(); // [{ssid, rssi, secure}]
+    renderNets(nets);
+  } catch (_) {
+    $("netlist").innerHTML = `<div class="row"><span class="name">Scan failed — tap “Scan again”.</span></div>`;
+  }
+}
+
+function renderNets(nets){
+  const box = $("netlist");
+  const seen = new Set();
+  const list = nets.filter(n => n.ssid && !seen.has(n.ssid) && seen.add(n.ssid));
+  if (!list.length){ box.innerHTML = `<div class="row"><span class="name">No networks found.</span></div>`; return; }
+  box.innerHTML = "";
+  list.forEach(n => {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<span class="name"></span>
+      <span class="meta">${n.secure ? "🔒" : ""} ${bars(rssiToBars(n.rssi ?? -80))}</span>`;
+    row.querySelector(".name").textContent = n.ssid;
+    row.onclick = () => pick(n);
+    box.appendChild(row);
+  });
+}
+
+function pick(n){
+  chosen = n;
+  $("chosen-name").textContent = n.ssid;
+  $("pw").value = "";
+  $("pw-error").classList.add("hidden");
+  show("step-password");
+  if (!n.secure) $("pw").placeholder = "Open network — leave blank";
+}
+
+$("rescan").onclick = scan;
+$("back").onclick = () => show("step-network");
+
+$("connect").onclick = () => {
+  const btn = $("connect");
+  btn.disabled = true; btn.innerHTML = `<span class="spin"></span>Connecting…`;
+  $("connecting-name").textContent = chosen.ssid;
+  $("success-name").textContent = chosen.ssid;
+  show("step-connecting");
+  // Fire-and-forget: Zügli leaves this hotspot to attempt the join, so we won't get a
+  // meaningful response (the request may even error as the connection drops). Either way,
+  // show the hand-off guidance after a moment.
+  fetch("/connect", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ssid: chosen.ssid, password: $("pw").value }),
+  }).catch(() => {});
+  setTimeout(() => show("step-success"), 1500);
+};
+
+scan();
+</script>
+</body>
+</html>

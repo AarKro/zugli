@@ -1,2 +1,24 @@
+# --- Editor / agent / OS ---
 .claude
+.DS_Store
 .DS_STORE
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Rust / embedded build ---
+# Keep Cargo.lock for the firmware (it's a binary/firmware crate, not a library).
+target/
+**/target/
+*.rs.bk
+*.pdb
+.embuild/
+
+# --- Flashing / build output ---
+*.bin
+*.elf
+*.map
+
+# --- Secrets / local config (must never be committed) ---
+.env
+*.local

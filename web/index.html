@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zügli</title>
+<!--
+  Phase 2 configuration page (PROJECT_BRIEF.md §4). Served by the ESP32 over HTTP at
+  http://zugli.local (or the device IP). Self-contained: all CSS/JS inline. The only
+  network calls are HTTPS requests straight from this page to transport.opendata.ch
+  (CORS-enabled, no key) plus one same-origin POST /save to the device.
+
+  Font note (brief §8-7): production should embed an Archivo subset as a base64
+  @font-face so the page renders even with no internet for font CDNs. For now we load
+  Archivo from Google Fonts with a system-font fallback; swap in the base64 face before
+  shipping offline units.  TODO(offline-font)
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#191919; --surface:#0E0C0A; --accent:#B87648;
+    --selected:#2C2213; --cream:#F5EFE6; --muted:#5C554C;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--cream);
+    font-family:'Archivo',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    font-size:16px; line-height:1.4;
+    -webkit-font-smoothing:antialiased; padding:32px 20px 64px;
+  }
+  .wrap{max-width:440px;margin:0 auto;}
+  h1{color:var(--accent);font-weight:700;font-size:30px;margin:0 0 28px;letter-spacing:.5px;}
+  h2{color:var(--cream);font-weight:500;font-size:19px;margin:28px 0 12px;}
+  .field{
+    width:100%;background:var(--cream);color:#1a1410;border:none;border-radius:12px;
+    padding:14px 16px;font-size:16px;font-family:inherit;outline:none;
+  }
+  .field::placeholder{color:var(--muted);}
+  .search-wrap{position:relative;}
+  .dropdown{
+    position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:5;
+    background:var(--cream);border-radius:12px;overflow:hidden;
+    box-shadow:0 10px 30px rgba(0,0,0,.45);
+  }
+  .dropdown .row{padding:13px 16px;color:#1a1410;cursor:pointer;border-top:1px solid #e0d8cc;}
+  .dropdown .row:first-child{border-top:none;}
+  .dropdown .row:active{background:#ece3d6;}
+  .hidden{display:none !important;}
+  .muted{color:var(--muted);}
+  .conn{
+    display:flex;align-items:center;gap:12px;background:var(--surface);
+    border:2px solid transparent;border-radius:12px;padding:12px 14px;margin-bottom:10px;cursor:pointer;
+  }
+  .conn.selected{border-color:var(--accent);background:var(--selected);}
+  .badge{
+    flex:none;min-width:34px;padding:3px 9px;border-radius:7px;text-align:center;
+    font-weight:600;font-size:15px;
+  }
+  .badge.filled{background:var(--accent);color:var(--surface);}
+  .badge.outline{background:transparent;border:1.5px solid var(--accent);color:var(--accent);}
+  .conn .dest{color:var(--cream);font-size:16px;}
+  .conn .arrow{color:var(--muted);}
+  .preview{
+    background:var(--surface);border-radius:12px;padding:16px 18px;
+    font-variant-numeric:tabular-nums;
+  }
+  .preview .line{
+    display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+    color:var(--accent);font-weight:600;font-size:20px;letter-spacing:.5px;
+  }
+  .preview .dots{flex:1;border-bottom:2px dotted #3a322a;margin:0 4px 6px;}
+  .btn{
+    width:100%;background:var(--accent);color:var(--surface);border:none;border-radius:12px;
+    padding:16px;font-size:19px;font-weight:600;font-family:inherit;margin-top:24px;cursor:pointer;
+    min-height:44px;
+  }
+  .btn[disabled]{opacity:.6;cursor:default;}
+  .note{margin-top:14px;font-size:15px;}
+  .note.err{color:#e08a5a;}
+  .note.ok{color:var(--accent);}
+  .spin{display:inline-block;width:15px;height:15px;border:2px solid rgba(14,12,10,.4);
+    border-top-color:var(--surface);border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px;margin-right:8px;}
+  @keyframes s{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Zügli</h1>
+
+  <!-- State 1/2: stop search + autocomplete -->
+  <h2>Where should Zügli look?</h2>
+  <div class="search-wrap">
+    <input class="field" id="stop" type="text" placeholder="Search a stop…" autocomplete="off" spellcheck="false">
+    <div class="dropdown hidden" id="results"></div>
+  </div>
+
+  <!-- State 3/4: connection list -->
+  <div id="conn-section" class="hidden">
+    <h2>Which connection?</h2>
+    <div id="conns"></div>
+    <p class="note muted hidden" id="conn-empty">No live connections at this stop right now.</p>
+  </div>
+
+  <!-- State 4: live preview of what the panel will show -->
+  <div id="preview-section" class="hidden">
+    <h2>This is what Zügli will show</h2>
+    <div class="preview">
+      <div class="line"><span id="pv-left">—</span><span class="dots"></span><span id="pv-right">—</span></div>
+    </div>
+    <button class="btn" id="save">Save to Zügli</button>
+    <p class="note hidden" id="status"></p>
+  </div>
+</div>
+
+<script>
+"use strict";
+const API = "https://transport.opendata.ch/v1";
+const $ = (id) => document.getElementById(id);
+
+let selectedStop = null;     // {id, name}
+let selectedConn = null;     // {line, category, destination, minutes}
+
+// ---------- stop autocomplete (phone → API directly, brief §6.1) ----------
+let debounce;
+$("stop").addEventListener("input", (e) => {
+  const q = e.target.value.trim();
+  selectedStop = null; resetConnections();
+  clearTimeout(debounce);
+  if (q.length < 2) { hideResults(); return; }
+  debounce = setTimeout(() => searchStops(q), 250);
+});
+
+async function searchStops(q){
+  try {
+    const r = await fetch(`${API}/locations?query=${encodeURIComponent(q)}&type=station`);
+    const data = await r.json();
+    const stations = (data.stations || []).filter(s => s.id && s.name);
+    renderResults(stations);
+  } catch (_) { hideResults(); }
+}
+
+function renderResults(stations){
+  const box = $("results");
+  if (!stations.length){ hideResults(); return; }
+  box.innerHTML = "";
+  stations.slice(0, 8).forEach(s => {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.textContent = s.name;
+    row.onclick = () => chooseStop(s);
+    box.appendChild(row);
+  });
+  box.classList.remove("hidden");
+}
+function hideResults(){ $("results").classList.add("hidden"); }
+
+function chooseStop(s){
+  selectedStop = { id: String(s.id), name: s.name };
+  $("stop").value = s.name;
+  hideResults();
+  loadConnections(s.id);
+}
+
+// ---------- connection list (brief §6.2: stationboard, dedupe by number+to) ----------
+async function loadConnections(stopId){
+  const sec = $("conn-section");
+  sec.classList.remove("hidden");
+  $("conns").innerHTML = `<p class="note muted">Loading connections…</p>`;
+  $("conn-empty").classList.add("hidden");
+  try {
+    const r = await fetch(`${API}/stationboard?id=${encodeURIComponent(stopId)}&limit=20`);
+    const data = await r.json();
+    const board = data.stationboard || [];
+    const seen = new Set();
+    const conns = [];
+    for (const e of board){
+      const line = e.number ?? e.name ?? "";
+      const dest = e.to ?? "";
+      const key = line + "→" + dest;
+      if (!line || !dest || seen.has(key)) continue;
+      seen.add(key);
+      conns.push({ line, category: e.category || "", destination: dest });
+    }
+    renderConnections(conns);
+  } catch (_) {
+    $("conns").innerHTML = `<p class="note err">Couldn't load connections — try again.</p>`;
+  }
+}
+
+// Rail = outlined badge, tram/bus = filled (brief §4.2).
+function isRail(cat){
+  const c = (cat || "").toUpperCase();
+  return !(c === "T" || c === "B" || c === "NFT" || c === "NFB" || c === "TROLLEY");
+}
+
+function renderConnections(conns){
+  const box = $("conns");
+  box.innerHTML = "";
+  if (!conns.length){ $("conn-empty").classList.remove("hidden"); return; }
+  conns.forEach(c => {
+    const row = document.createElement("div");
+    row.className = "conn";
+    const badge = document.createElement("span");
+    badge.className = "badge " + (isRail(c.category) ? "outline" : "filled");
+    badge.textContent = c.line;
+    const arrow = document.createElement("span"); arrow.className = "arrow"; arrow.textContent = "→";
+    const dest = document.createElement("span"); dest.className = "dest"; dest.textContent = c.destination;
+    row.append(badge, arrow, dest);
+    row.onclick = () => selectConnection(c, row);
+    box.appendChild(row);
+  });
+}
+
+function resetConnections(){
+  $("conn-section").classList.add("hidden");
+  $("preview-section").classList.add("hidden");
+  selectedConn = null;
+}
+
+// ---------- selected connection + live preview (brief §4.2 State 4) ----------
+async function selectConnection(c, row){
+  document.querySelectorAll(".conn.selected").forEach(el => el.classList.remove("selected"));
+  row.classList.add("selected");
+  selectedConn = { ...c };
+  $("preview-section").classList.remove("hidden");
+  $("pv-left").textContent = `${c.line} ${c.destination}`;
+  $("pv-right").textContent = "…";
+  $("status").classList.add("hidden");
+  const mins = await nextMinutes(selectedStop.id, c.line, c.destination);
+  selectedConn.minutes = mins;
+  $("pv-right").textContent = mins == null ? "--" : (mins === 0 ? "now" : `${mins}'`);
+}
+
+// minutes-to-departure: prefer real-time prognosis, else scheduled (brief §6.2 / §8-6)
+async function nextMinutes(stopId, line, dest){
+  try {
+    const r = await fetch(`${API}/stationboard?id=${encodeURIComponent(stopId)}&limit=20`);
+    const data = await r.json();
+    const now = Date.now() / 1000;
+    let best = null;
+    for (const e of (data.stationboard || [])){
+      const eLine = e.number ?? e.name ?? "";
+      if (eLine !== line || (e.to ?? "") !== dest) continue;
+      const prog = e.stop?.prognosis?.departure;
+      const t = prog ? Date.parse(prog) / 1000 : e.stop?.departureTimestamp;
+      if (!t) continue;
+      if (best == null || t < best) best = t;
+    }
+    if (best == null) return null;
+    return Math.max(0, Math.round((best - now) / 60));
+  } catch (_) { return null; }
+}
+
+// ---------- save (POST /save to the device, brief §4.3/§4.4) ----------
+$("save").addEventListener("click", async () => {
+  if (!selectedStop || !selectedConn) return;
+  const btn = $("save"), st = $("status");
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spin"></span>Saving…`;
+  st.className = "note hidden";
+  const body = {
+    stopId: selectedStop.id,
+    stopName: selectedStop.name,
+    line: selectedConn.line,
+    category: selectedConn.category,
+    destination: selectedConn.destination,
+  };
+  try {
+    const r = await fetch("/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error("bad status");
+    st.textContent = "Saved — Zügli is updating.";
+    st.className = "note ok";
+    btn.textContent = "Saved ✓";
+  } catch (_) {
+    st.textContent = "Couldn't reach Zügli — try again.";
+    st.className = "note err";
+    btn.disabled = false;
+    btn.textContent = "Save to Zügli";
+  }
+});
+</script>
+</body>
+</html>
