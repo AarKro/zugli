@@ -64,28 +64,6 @@ impl Store {
             nvs_offset,
             nvs.len()
         );
-
-        // DIAGNOSTIC (temporary): raw dump of the store sector, read directly from flash
-        // before any magic/deserialize logic. Tells us whether persisted bytes physically
-        // survive a reboot, independent of how we decode them. Bytes 0..4 are the magic (LE),
-        // 4..8 the payload length, 8.. the JSON payload. All-`ff` means an erased sector.
-        let base = nvs_offset + STORE_SECTOR;
-        let mut head = [0u8; 8 + MAX_PAYLOAD];
-        if flash.read(base, &mut head).is_ok() {
-            let len = u32::from_le_bytes(head[4..8].try_into().unwrap()) as usize;
-            info!("storage: RAW @{base:#x} hdr = {:02x?}", &head[..8]);
-            if (1..=MAX_PAYLOAD).contains(&len) {
-                let payload = &head[8..8 + len];
-                info!("storage: RAW payload bytes = {payload:02x?}");
-                match core::str::from_utf8(payload) {
-                    Ok(s) => info!("storage: RAW payload text  = {s}"),
-                    Err(_) => warn!("storage: RAW payload is not valid UTF-8"),
-                }
-            }
-        } else {
-            warn!("storage: RAW @{base:#x} read failed");
-        }
-
         Ok(Self { flash, nvs_offset })
     }
 

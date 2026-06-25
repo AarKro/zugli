@@ -40,7 +40,7 @@ const PLANES: usize = 7;
 // GLOBAL BRIGHTNESS — the only real dimmer available: the HUB75 driver has no brightness
 // register, so brightness is purely the RGB values we write (Binary Code Modulation). This
 // percent scales the whole palette. Lower = dimmer. Tune to taste.
-const BRIGHTNESS: u32 = 30;
+const BRIGHTNESS: u32 = 10;
 
 /// Scale one channel by [`BRIGHTNESS`] (const so the palette stays compile-time constants).
 const fn b(channel: u8) -> u8 {
