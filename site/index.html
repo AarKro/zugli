@@ -120,24 +120,20 @@
   .led-panel{
     position:relative;width:min(420px,100%);aspect-ratio:1/1;
     background:#070605;border-radius:18px;
-    padding:22px 20px;
+    padding:14px;
     border:1px solid rgba(184,118,72,.22);
     box-shadow:0 0 0 10px #100d0b, 0 30px 80px -20px rgba(0,0,0,.9),
                0 0 60px -6px rgba(184,118,72,.35);
-    display:flex;flex-direction:column;justify-content:center;gap:14px;
-    font-family:"Space Mono",ui-monospace,monospace;
+    display:flex;align-items:center;justify-content:center;
     overflow:hidden;
   }
-  /* dot-matrix + scanline texture */
-  .led-panel::before{
-    content:"";position:absolute;inset:0;pointer-events:none;
-    background-image:radial-gradient(rgba(255,255,255,.035) 1px, transparent 1.4px);
-    background-size:7px 7px;mix-blend-mode:screen;
-  }
+  /* the matrix itself — real glowing dots are drawn on this canvas */
+  .led-canvas{display:block;width:100%;height:auto;aspect-ratio:1/1;border-radius:8px;}
+  /* faint CRT scanline over the panel */
   .led-panel::after{
     content:"";position:absolute;inset:0;pointer-events:none;
     background:linear-gradient(rgba(0,0,0,0) 50%, rgba(0,0,0,.22) 50%);
-    background-size:100% 4px;opacity:.5;
+    background-size:100% 3px;opacity:.32;border-radius:8px;
   }
   .led-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
     color:var(--accent);text-shadow:0 0 8px rgba(184,118,72,.65);font-size:clamp(15px,4.3vw,21px);}
@@ -190,6 +186,8 @@
   .ph svg{width:40px;height:40px;color:rgba(184,118,72,.6);}
   .ph .ph-label{font-size:13px;letter-spacing:.04em;}
   .ph .ph-sub{font-size:11px;color:rgba(92,85,76,.8);}
+  .feat-img{display:block;margin:0 auto;max-width:100%;max-height:540px;width:auto;height:auto;
+    filter:drop-shadow(0 30px 60px rgba(0,0,0,.55));}
 
   /* ---------- how it works ---------- */
   .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(18px,2.4vw,24px);margin-top:clamp(36px,6vw,54px);}
@@ -324,13 +322,11 @@
 
       <div class="panel-stage reveal">
         <div>
-          <!-- SIGNATURE VISUAL: a CSS mock of the real 64×64 LED board.
-               Swap for a photo of the finished Zügli later if you like. -->
-          <div class="led-panel" role="img" aria-label="Zügli LED panel showing tram line 2 to Schlieren departing in 4, 16 and 28 minutes">
+          <!-- SIGNATURE VISUAL: a live simulation of the real 64×64 HUB75 LED matrix,
+               rendered dot-by-dot on a canvas. -->
+          <div class="led-panel" role="img" aria-label="A 64 by 64 LED matrix: a Swiss tram rolls along the rails under the overhead wire while a departure board scrolls line 2 to Schlieren in 4, 16 and 28 minutes">
             <div class="live-tag"><span class="live-dot"></span>live</div>
-            <div class="led-row next"><span><span class="ln">2</span><span class="dest">Schlieren</span></span><span class="min">4'</span></div>
-            <div class="led-row dim"><span><span class="ln">2</span><span class="dest">Schlieren</span></span><span class="min">16'</span></div>
-            <div class="led-row dim"><span><span class="ln">2</span><span class="dest">Schlieren</span></span><span class="min">28'</span></div>
+            <canvas class="led-canvas" width="576" height="576" aria-hidden="true"></canvas>
           </div>
           <p class="panel-caption">The next three departures of the one line you care about.</p>
         </div>
@@ -387,12 +383,8 @@
         and nothing to install.</p>
       </div>
       <div class="feat-media">
-        <!-- IMAGE SLOT: the config page on a phone. Replace with a screenshot/photo. -->
-        <div class="ph">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></svg>
-          <span class="ph-label">Your photo: setup on a phone</span>
-          <span class="ph-sub">e.g. the config page at zugli.local</span>
-        </div>
+        <img class="feat-img" src="img/config.png" width="980" height="1880"
+             alt="The Zügli config page open in a phone browser at zugli.local, searching for a stop and picking a connection." loading="lazy">
       </div>
     </div>
 
@@ -405,12 +397,8 @@
         is published. Build it exactly as documented, or change whatever you like. It's yours.</p>
       </div>
       <div class="feat-media">
-        <!-- IMAGE SLOT: the guts / wiring shot. Replace with a build photo. -->
-        <div class="ph">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 4v3M15 4v3M9 17v3M15 17v3M4 9h3M4 15h3M17 9h3M17 15h3"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
-          <span class="ph-label">Your photo: the wiring / build</span>
-          <span class="ph-sub">ESP32 + HUB75 panel close-up</span>
-        </div>
+        <img class="feat-img" src="img/wiring.png" width="1536" height="2048"
+             alt="The back of the HUB75 LED panel with the ESP32-S3 microcontroller wired to it by a ribbon of jumper wires." loading="lazy">
       </div>
     </div>
 
@@ -602,18 +590,201 @@
     els.forEach(function(e){io.observe(e);});
   })();
 
-  // Tiny life: gently tick the hero panel's lead departure so it feels live.
+  // Signature visual: a real 64x64 LED matrix simulation. Each LED is drawn as a
+  // glowing dot; a Swiss tram rolls along the rails under the catenary while a
+  // departure board scrolls underneath. Pure canvas, no dependencies.
   (function(){
-    if(window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    var mins = [4,16,28];
-    var next = document.querySelector('.led-panel .led-row.next .min');
-    var rows = document.querySelectorAll('.led-panel .led-row .min');
-    if(!next) return;
-    setInterval(function(){
-      mins = mins.map(function(m){return m-1;});
-      if(mins[0] < 0){ mins = [4,16,28]; }      // loop the demo
-      rows.forEach(function(el,i){ el.textContent = (mins[i] <= 0 ? "now" : mins[i] + "'"); });
-    }, 4000);
+    var cv = document.querySelector('.led-canvas');
+    if(!cv || !cv.getContext) return;
+    var ctx = cv.getContext('2d', {alpha:false});
+    if(!ctx) return;
+    var W=64, H=64, CELL=cv.width/W;           // 576/64 = 9px per LED
+    var DOT=CELL*0.30, BLOOM=CELL*0.62;
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // ---- framebuffer (additive RGB, 0..1) ----
+    var R=new Float32Array(W*H), G=new Float32Array(W*H), B=new Float32Array(W*H);
+    function clearFB(){ R.fill(0); G.fill(0); B.fill(0); }
+    function px(x,y,c,a){
+      x=x|0; y=y|0; if(x<0||y<0||x>=W||y>=H) return;
+      if(a===undefined) a=1;
+      var i=y*W+x;
+      R[i]+=c[0]*a; if(R[i]>1)R[i]=1;
+      G[i]+=c[1]*a; if(G[i]>1)G[i]=1;
+      B[i]+=c[2]*a; if(B[i]>1)B[i]=1;
+    }
+    function set(x,y,c){
+      x=x|0; y=y|0; if(x<0||y<0||x>=W||y>=H) return;
+      var i=y*W+x; R[i]=c[0]; G[i]=c[1]; B[i]=c[2];
+    }
+    function hline(x0,x1,y,c,a){ for(var x=x0;x<=x1;x++) px(x,y,c,a); }
+
+    // ---- palette (matches the site's warm accent / cream) ----
+    var ACC=[0.86,0.55,0.32], ACCH=[0.97,0.66,0.40], ACCD=[0.42,0.25,0.13],
+        CREAM=[0.97,0.92,0.82], WHITE=[1,0.98,0.92],
+        WIRE=[0.30,0.22,0.16], RAIL=[0.55,0.40,0.26], SLEEP=[0.20,0.13,0.08];
+
+    // ---- prebake the unlit dot grid (drawn once, blitted each frame) ----
+    var bg=document.createElement('canvas'); bg.width=cv.width; bg.height=cv.height;
+    (function(){
+      var b=bg.getContext('2d');
+      b.fillStyle='#080605'; b.fillRect(0,0,bg.width,bg.height);
+      b.fillStyle='#171009';
+      for(var y=0;y<H;y++) for(var x=0;x<W;x++){
+        b.beginPath();
+        b.arc(x*CELL+CELL/2, y*CELL+CELL/2, DOT, 0, 6.2832);
+        b.fill();
+      }
+    })();
+
+    function paint(){
+      ctx.drawImage(bg,0,0);
+      ctx.globalCompositeOperation='lighter';
+      for(var y=0;y<H;y++) for(var x=0;x<W;x++){
+        var i=y*W+x, r=R[i], g=G[i], bl=B[i];
+        if(r+g+bl<=0.004) continue;
+        var cx=x*CELL+CELL/2, cy=y*CELL+CELL/2;
+        ctx.fillStyle='rgba('+((r*255)|0)+','+((g*255)|0)+','+((bl*255)|0)+',0.20)';
+        ctx.beginPath(); ctx.arc(cx,cy,BLOOM,0,6.2832); ctx.fill();
+        ctx.fillStyle='rgb('+((Math.min(1,r*1.12)*255)|0)+','+((Math.min(1,g*1.12)*255)|0)+','+((Math.min(1,bl*1.12)*255)|0)+')';
+        ctx.beginPath(); ctx.arc(cx,cy,DOT*1.06,0,6.2832); ctx.fill();
+      }
+      ctx.globalCompositeOperation='source-over';
+    }
+
+    // ---- crisp pixel text, sampled once from a real font into a 1-bit bitmap ----
+    function sampleText(text, fpx, alphaCut){
+      try{
+        var oc=document.createElement('canvas'), c=oc.getContext('2d');
+        c.font='700 '+fpx+'px "Space Mono", ui-monospace, monospace';
+        var tw=Math.ceil(c.measureText(text).width)+2;
+        oc.width=tw; oc.height=fpx+6;
+        c=oc.getContext('2d');
+        c.font='700 '+fpx+'px "Space Mono", ui-monospace, monospace';
+        c.textBaseline='top'; c.fillStyle='#fff';
+        c.fillText(text,1,1);
+        var d=c.getImageData(0,0,oc.width,oc.height).data;
+        var rows=[], top=oc.height, bot=-1;
+        for(var y=0;y<oc.height;y++){
+          var row=new Uint8Array(oc.width), any=false;
+          for(var x=0;x<oc.width;x++){
+            if(d[(y*oc.width+x)*4+3] > (alphaCut||110)){ row[x]=1; any=true; }
+          }
+          rows.push(row);
+          if(any){ if(y<top)top=y; if(y>bot)bot=y; }
+        }
+        if(bot<top) return null;
+        var crop=[]; for(var y=top;y<=bot;y++) crop.push(rows[y]);
+        return {w:oc.width, h:crop.length, rows:crop};
+      }catch(e){ return null; }
+    }
+
+    // scrolling departure board across the bottom
+    var MARQ_TEXT = "ZÜRICH HB    LINIE 2  →  SCHLIEREN     4'      16'      28'        ";
+    var marq=null;
+    function drawMarquee(off, bandTop){
+      if(!marq) return;
+      var w=marq.w;
+      for(var x=0;x<W;x++){
+        var sx=(((off+x)%w)+w)%w;
+        for(var y=0;y<marq.h;y++){ if(marq.rows[y][sx]) px(x, bandTop+y, ACC); }
+      }
+    }
+
+    // big countdown in the middle — the one number you read across the room
+    var bigSeq=[4,3,2,1], bigCache={n:null,bmp:null};
+    function drawCountdown(now, midY){
+      var n = reduce ? 4 : bigSeq[Math.floor(now/3400)%bigSeq.length];
+      if(bigCache.n!==n){ bigCache.n=n; bigCache.bmp=sampleText(n+"'",16,120); }
+      var b=bigCache.bmp; if(!b) return;
+      var ox=(W-b.w)>>1, oy=midY-(b.h>>1);
+      for(var y=0;y<b.h;y++) for(var x=0;x<b.w;x++){
+        if(b.rows[y][x]) px(ox+x, oy+y, ACCH);
+      }
+    }
+
+    // ---- the tram (drawn front-first, moving right to left) ----
+    function bogie(x,y){
+      var K=[0.04,0.03,0.02];
+      hline(x,x+4,y,ACCD);
+      px(x+1,y+1,K); px(x+1,y+2,K);
+      px(x+3,y+1,K); px(x+3,y+2,K);
+    }
+    function drawTram(ox, top){
+      var w=28;
+      // body, with a sloped nose on the leading (left) edge
+      for(var x=0;x<w;x++){
+        var bt = top+1;
+        if(x===0) bt=top+4; else if(x===1) bt=top+2; else if(x===2) bt=top+1;
+        for(var y=bt;y<=top+11;y++) px(ox+x,y, ACC);
+      }
+      hline(ox+2,ox+w-2, top+1, ACCH);       // roof highlight
+      hline(ox+1,ox+w-2, top+11, ACCD);      // skirt shadow
+      // dark glass windows (overwrite body) with thin mullions
+      var GLASS=[0.06,0.05,0.04], LITWIN=[0.85,0.78,0.55];
+      for(var x=8;x<w-2;x++){
+        if((x-8)%3!==2){ for(var y=top+3;y<=top+6;y++) set(ox+x,y, GLASS); }
+      }
+      // one lit interior window for warmth
+      for(var y=top+3;y<=top+5;y++){ set(ox+10,y,LITWIN); set(ox+11,y,LITWIN); }
+      // front route blind: a lit "2" on a dark sign
+      var SG=[[1,1,1],[0,0,1],[1,1,1],[1,0,0],[1,1,1]];
+      for(var y=0;y<5;y++) for(var x=0;x<3;x++)
+        set(ox+3+x, top+3+y, SG[y][x] ? [1,0.82,0.42] : [0.05,0.04,0.03]);
+      // headlight on the nose
+      px(ox, top+8, WHITE); px(ox, top+9, WHITE); px(ox, top+10, ACCH);
+      px(ox+1, top+9, [0.95,0.85,0.6]);
+      // pantograph reaching up to the wire
+      px(ox+w-9, top, ACCH); px(ox+w-9, top-1, ACCD);
+      hline(ox+w-11, ox+w-7, top-2, ACCD);
+      // bogies
+      bogie(ox+3, top+12); bogie(ox+18, top+12);
+    }
+
+    // ---- scene geometry ----
+    var WIRE_Y=5, TRAM_TOP=8, RAIL_Y=22, MID_Y=37, MARQ_TOP=49;
+    function drawTrack(){
+      hline(0,W-1, WIRE_Y, WIRE);                 // catenary / overhead wire
+      for(var x=0;x<W;x+=8) px(x, WIRE_Y+1, WIRE, 0.6);   // droppers
+      hline(0,W-1, RAIL_Y, RAIL);                 // rail
+      for(var x=2;x<W;x+=5){ px(x, RAIL_Y+1, SLEEP); }    // sleepers
+    }
+
+    var span=W+34, moveMs=6200, gapMs=2600, cycle=moveMs+gapMs;
+    function frame(now){
+      clearFB();
+      drawTrack();
+      var tm = reduce ? 2200 : (now % cycle);
+      if(tm < moveMs){
+        var f = tm/moveMs;
+        drawTram(Math.round(W - f*span), TRAM_TOP);
+      }
+      drawCountdown(now, MID_Y);
+      drawMarquee(reduce ? 0 : Math.floor(now*0.020), MARQ_TOP);
+      paint();
+    }
+
+    // ---- build marquee (retry once fonts are ready) and run ----
+    marq = sampleText(MARQ_TEXT, 9);
+    if(document.fonts && document.fonts.ready){
+      document.fonts.ready.then(function(){
+        var m=sampleText(MARQ_TEXT, 9); if(m) marq=m;
+        bigCache.n=null;                       // rebuild big digits with real font
+      });
+    }
+
+    if(reduce){ frame(2200); return; }           // single, settled static frame
+
+    var running=false, raf=0;
+    function loop(now){ frame(now||0); raf=requestAnimationFrame(loop); }
+    function startStop(on){
+      if(on && !running){ running=true; raf=requestAnimationFrame(loop); }
+      else if(!on && running){ running=false; cancelAnimationFrame(raf); }
+    }
+    if('IntersectionObserver' in window){
+      new IntersectionObserver(function(e){ startStop(e[0].isIntersecting); },
+        {threshold:0.05}).observe(cv);
+    } else { startStop(true); }
   })();
 </script>
 </body>
