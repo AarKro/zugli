@@ -86,38 +86,61 @@ fn device_ip(stack: Stack<'_>) -> Option<[u8; 4]> {
     stack.config_v4().map(|c| c.address.address().octets())
 }
 
-/// Does the first question name our host (`zugli.local`) and ask for an address record?
+/// Does *any* question in the packet ask for our host (`zugli.local`) by A or ANY record?
 ///
-/// Question names in mDNS queries are uncompressed, so a linear label walk is enough.
+/// We scan every question, not just the first: iOS/macOS bundle the `A` and `AAAA`
+/// questions for a name into one query packet, and the `AAAA` one can come first — checking
+/// only question 0 would miss the `A` we can actually answer.
 fn question_matches(pkt: &[u8]) -> bool {
-    let mut i = 12; // skip the 12-byte header to the first QNAME
-    for label in LABELS {
-        let len = match pkt.get(i) {
-            Some(&l) => l as usize,
-            None => return false,
+    let qdcount = match pkt.get(4..6) {
+        Some([hi, lo]) => u16::from_be_bytes([*hi, *lo]) as usize,
+        _ => return false,
+    };
+    let mut i = 12; // first QNAME, just past the 12-byte header
+    for _ in 0..qdcount {
+        let (name_ok, after_name) = match walk_name(pkt, i) {
+            Some(v) => v,
+            None => return false, // malformed or compressed: give up on this packet
         };
-        // Reject compression pointers / the root label here — neither belongs mid-name.
-        if len == 0 || len & 0xC0 != 0 || len != label.len() {
-            return false;
+        // QTYPE (2) + QCLASS (2) follow the name. (QCLASS is ignored: its top bit is the
+        // unicast-response request, the rest is IN; either way we answer over multicast.)
+        let qtype = match pkt.get(after_name..after_name + 2) {
+            Some([hi, lo]) => u16::from_be_bytes([*hi, *lo]),
+            _ => return false,
+        };
+        if name_ok && (qtype == 1 || qtype == 255) {
+            return true;
+        }
+        i = after_name + 4; // skip QTYPE + QCLASS to the next question
+    }
+    false
+}
+
+/// Walk one uncompressed QNAME from `start`. Returns `(whether it equals zugli.local, offset
+/// just past the root label)`, or `None` if the name is malformed or uses a compression
+/// pointer (not expected in a query name).
+fn walk_name(pkt: &[u8], start: usize) -> Option<(bool, usize)> {
+    let mut i = start;
+    let mut idx = 0; // which of our LABELS we expect next
+    let mut matches = true;
+    loop {
+        let len = *pkt.get(i)? as usize;
+        if len == 0 {
+            // Root label ends the name; it matched only if we consumed exactly our labels.
+            return Some((matches && idx == LABELS.len(), i + 1));
+        }
+        if len & 0xC0 != 0 {
+            return None; // compression pointer
         }
         i += 1;
-        let end = i + len;
-        if pkt.get(i..end).is_none_or(|s| !s.eq_ignore_ascii_case(label)) {
-            return false;
+        let label = pkt.get(i..i + len)?;
+        // A mismatch fails the name, but we keep walking to find the next question's offset.
+        if idx >= LABELS.len() || len != LABELS[idx].len() || !label.eq_ignore_ascii_case(LABELS[idx])
+        {
+            matches = false;
         }
-        i = end;
-    }
-    // Terminating root label, then QTYPE = A (1) or ANY (255). (QCLASS is ignored: its top
-    // bit is the unicast-response request, the rest is IN; either way we answer.)
-    if pkt.get(i) != Some(&0) {
-        return false;
-    }
-    match pkt.get(i + 1..i + 3) {
-        Some([hi, lo]) => {
-            let qtype = u16::from_be_bytes([*hi, *lo]);
-            qtype == 1 || qtype == 255
-        }
-        _ => false,
+        idx += 1;
+        i += len;
     }
 }
 

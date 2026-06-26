@@ -12,7 +12,7 @@
 //! 1. Bring up the HAL, heap, RTOS scheduler, flash store, and the dual-core HUB75 display.
 //! 2. If WiFi credentials exist → STA mode: serve the config page, sync time, poll & render
 //!    (Phases 2 + 3). Otherwise → captive portal (Phase 1).
-//! 3. A BOOT-button hold (3 s) clears the WiFi creds and reboots (UC3).
+//! 3. A BOOT-button hold (3 s) wipes the WiFi creds + saved connection and reboots (UC3).
 
 use embassy_executor::Spawner;
 use embassy_net::{Config as NetConfig, StackResources};
@@ -212,8 +212,8 @@ async fn net_ready_task(stack: embassy_net::Stack<'static>) {
     }
 }
 
-/// Poll the BOOT button (GPIO0). A continuous 3 s hold clears WiFi credentials only and
-/// reboots into the captive portal (UC3, brief §7.9).
+/// Poll the BOOT button (GPIO0). A continuous 3 s hold wipes the stored WiFi credentials
+/// and the saved connection, then reboots into the captive portal (UC3, brief §7.9).
 #[embassy_executor::task]
 async fn button_task(button: Input<'static>) {
     const HOLD: Duration = Duration::from_secs(3);
@@ -222,11 +222,11 @@ async fn button_task(button: Input<'static>) {
             let start = Instant::now();
             while button.is_low() {
                 if start.elapsed() >= HOLD {
-                    info!("button: 3s hold → clearing WiFi creds, rebooting");
+                    info!("button: 3s hold → clearing WiFi creds + connection, rebooting");
                     {
                         let mut g = STORE.lock().await;
                         if let Some(store) = g.as_mut() {
-                            let _ = store.clear_wifi();
+                            let _ = store.clear_all();
                         }
                     }
                     Timer::after(Duration::from_millis(200)).await;

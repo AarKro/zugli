@@ -39,7 +39,7 @@ attached mockups). On that page the user searches for a stop, picks one live con
 (line + destination), and saves it. The selection is stored in the device's flash. From
 then on, the firmware polls the Swiss transport API every 30 seconds and renders the
 countdown to the next departure of that connection on the LED panel. Holding the BOOT
-button for 3+ seconds wipes the saved WiFi and returns to the captive-portal setup.
+button for 3+ seconds wipes the saved WiFi and connection and returns to the captive-portal setup.
 
 ---
 
@@ -71,7 +71,7 @@ There are **three runtime phases**. The agent must implement all three.
             │  Filters to the saved line+destination, keeps the next 3 departures,          │
             │  computes minutes-to-departure for each, renders on the 64×64 HUB75 panel.    │
             │                                                                               │
-            │  BOOT held 3 s (UC3) → clear WiFi creds → reboot → Phase 1                     │
+            │  BOOT held 3 s (UC3) → wipe WiFi + connection → reboot → Phase 1               │
             └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -130,21 +130,16 @@ build.)
 
 ### 3.3 mDNS / how the user reaches the page
 
-After joining home WiFi the device should advertise mDNS (via the **`edge-mdns`** crate) so
-the user can browse to a name instead of hunting for an IP. **Use an ASCII hostname** —
-`zugli.local` — because the `ü` in "Zügli" would require punycode (`xn--zgly-…`) in mDNS and
-is unreliable across phones. Because mDNS can be flaky on some phones/networks, the device
-also **renders its current IP (and `zugli.local`) on the LED panel whenever it has joined
-WiFi but has no connection selected yet** (see §7.7) — that is how the user discovers the
-fallback address. The captive-portal success screen tells the user to try `zugli.local`
-first and to check the device's screen for its IP if that fails.
-
-> **As built: mDNS is implemented** by a small custom responder (`src/mdns.rs`, spawned in
-> STA mode), **not** the `edge-mdns` crate. It joins the `224.0.0.251:5353` multicast
-> group, sends a couple of unsolicited announcements, and answers `A` queries for
-> `zugli.local` with the device's live DHCP address — so `http://zugli.local` resolves on
-> the home network. The on-panel IP (§7.7) stays as the fallback for phones/networks where
-> mDNS is flaky.
+After joining home WiFi the device advertises mDNS so the user can browse to a name instead
+of hunting for an IP. The responder (`src/mdns.rs`, spawned in STA mode) joins the
+`224.0.0.251:5353` multicast group, sends a couple of unsolicited announcements, and answers
+`A` queries for `zugli.local` with the device's live DHCP address. **The hostname is ASCII**
+— `zugli.local` — because the `ü` in "Zügli" would require punycode (`xn--zgly-…`) in mDNS
+and is unreliable across phones. Because mDNS can still be flaky on some phones/networks, the
+device also **renders its current IP on the LED panel whenever it has joined WiFi but has no
+connection selected yet** (see §7.7) — that is how the user discovers the fallback address.
+The captive-portal success screen tells the user to try `zugli.local` first and to check the
+device's screen for its IP if that fails.
 
 ---
 
@@ -393,37 +388,33 @@ available and should use the real-time value.)*
 ## 7. PART C — Device firmware (Rust, `no_std`)
 
 The firmware is **embedded Rust on bare metal** (`no_std`, `esp-hal`), async via
-**Embassy**. The sections below give the agent a verified, mutually-compatible crate
-stack and the task breakdown. **All crates below were checked for compatibility for this
-exact use (ESP32-S3, WiFi + HUB75 together).**
+**Embassy**. The sections below document the crate stack and the task breakdown. The crates
+are a mutually-compatible set for this exact use (ESP32-S3, WiFi + HUB75 together).
 
-### 7.1 Crate stack (as built)
+### 7.1 Crate stack
 
-> **Updated to match the shipped firmware.** The table below is the *actual* stack in
-> `firmware/Cargo.toml`, with the resolved versions from `Cargo.lock`. Where the as-built
-> choice differs from the original plan, the "Notes" column says so. The single biggest
-> deltas from the first draft: the scaffold now sits on **`esp-rtos`** (the current
-> `esp-generate` template's Embassy integration), and four concerns — captive DNS, mDNS,
-> SNTP, and flash storage — were hand-rolled instead of using the edge-net / `sntpc` /
-> `sequential-storage` crates.
+The table is the stack in `firmware/Cargo.toml`, with the resolved versions from
+`Cargo.lock`. A few concerns — the captive DNS, mDNS, and SNTP responders, and flash
+storage — are small hand-rolled implementations driven directly over `embassy-net`
+sockets / raw flash rather than dedicated crates; the "Notes" column points at the source
+file for each.
 
 | Concern | Crate (version) | Notes |
 |---|---|---|
 | HAL | **`esp-hal` 1.1** | no_std HAL for ESP32-S3, `unstable` feature on |
-| RTOS / async scheduler | **`esp-rtos` 0.3** | **New vs the first draft.** Provides the Embassy integration and the dual-core start (`esp_rtos::start_second_core`). The current `esp-generate` template wires this in instead of starting `embassy-executor` directly. It pulls in **`embassy-executor` 0.10** + **`embassy-time` 0.5** (still used directly for tasks/timers). |
-| WiFi driver | **`esp-radio` 0.18** | The crate formerly called `esp-wifi`; STA **and** SoftAP modes |
-| TCP/IP stack | **`embassy-net` 0.9** (+ **`smoltcp` 0.13**) | features `tcp`, `udp`, `dns`, `dhcpv4` (`dhcpv4` = DHCP **client**, STA mode only) |
+| RTOS / async scheduler | **`esp-rtos` 0.3** | Provides the Embassy integration and the dual-core start (`esp_rtos::start_second_core`). Pulls in **`embassy-executor` 0.10** + **`embassy-time` 0.5**, used directly for tasks/timers. |
+| WiFi driver | **`esp-radio` 0.18** | STA **and** SoftAP modes |
+| TCP/IP stack | **`embassy-net` 0.9** (+ **`smoltcp` 0.13**) | features `tcp`, `udp`, `dns`, `dhcpv4`, `multicast` (`dhcpv4` = DHCP **client**, STA mode only) |
 | HTTP server (config + portal) | **`picoserve` 0.18** | async no_std HTTP server, embassy-native |
 | HTTP client (API poll) | **`reqwless` 0.14** | no_std HTTP/HTTPS client; built with `default-features = false` + `embedded-tls`, **`alloc`**, `log` (the `alloc` feature is required — see §7.5) |
-| TLS (for HTTPS API) | **`embedded-tls` 0.18** (via reqwless) + **`der` 0.8** pinned | `TlsVerify::None` (§7.5). `der` is pinned explicitly with its `heapless` feature so embedded-tls's `rustpki` module compiles — see the comment in `Cargo.toml`. |
-| DHCP (Phase 1 AP) | **`edge-dhcp` 0.8** | Used as a **packet codec** driven over an `embassy-net` UDP socket (`portal::dhcp_task`), **not** as a standalone server. Still the thing that hands the phone a `192.168.4.x` address. |
-| Captive DNS (Phase 1 AP) | **custom UDP responder** (`portal::dns_task`) | `edge-captive` was **not** used — a tiny hand-rolled catch-all answers every query with `192.168.4.1`. |
-| mDNS responder (Phase 2/3 STA) | **custom responder** (`src/mdns.rs`) | `edge-mdns` was **not** used — a hand-rolled responder (same spirit as the captive DNS) joins `224.0.0.251:5353`, announces, and answers `A` queries for `zugli.local`, so the name resolves on the home network. The on-panel IP (§7.7) remains as a fallback. |
+| TLS (for HTTPS API) | **`embedded-tls` 0.18** (via reqwless) + **`der` 0.8** | `TlsVerify::None` (§7.5). `der` is pinned with its `heapless` feature so embedded-tls's `rustpki` module compiles — see the comment in `Cargo.toml`. |
+| DHCP (Phase 1 AP) | **`edge-dhcp` 0.8** | Packet codec driven over an `embassy-net` UDP socket (`portal::dhcp_task`); hands the phone a `192.168.4.x` address. |
+| Captive DNS (Phase 1 AP) | hand-rolled (`portal::dns_task`) | A tiny catch-all that answers every query with `192.168.4.1` so the OS captive check pops the portal. |
+| mDNS responder (Phase 2/3 STA) | hand-rolled (`src/mdns.rs`) | Joins `224.0.0.251:5353`, announces, and answers `A` queries for `zugli.local` so the name resolves on the home network. The on-panel IP (§7.7) is the fallback. |
 | Display driver | **`esp-hub75` 0.11** (liebman) | DMA HUB75 driver on embedded-graphics; `iram` feature on |
-| Graphics | **`embedded-graphics` 0.8** | primitives + text |
-| Fonts | **built-in embedded-graphics mono fonts** | `u8g2-fonts` was **not** added |
-| Persistent storage | **`esp-storage` 0.9** + **`embedded-storage`** (raw NOR) + **`esp-bootloader-esp-idf`** partitions | `sequential-storage` was **not** used — a raw read-modify-write of one sector in the `nvs` partition (§7.8) |
-| Time | **custom minimal SNTP** over `embassy-net` UDP (`src/sntp.rs`) | `sntpc` was **not** used (§7.4) |
+| Graphics | **`embedded-graphics` 0.8** | primitives + text; built-in mono fonts |
+| Persistent storage | **`esp-storage` 0.9** + **`embedded-storage`** (raw NOR) + **`esp-bootloader-esp-idf`** partitions | Raw read-modify-write of one sector in the `nvs` partition (§7.8) |
+| Time | hand-rolled SNTP over `embassy-net` UDP (`src/sntp.rs`) | One-shot Unix time for the minute math (§7.4) |
 | Alloc / heap | **`esp-alloc` 0.10** | internal-RAM heap + PSRAM heap region for the big TLS/poll buffers |
 | Diagnostics | **`esp-backtrace` 0.19**, **`esp-println` 0.17**, **`log` 0.4** | panic handler + serial logging |
 | JSON / data | **`serde` 1** (no_std derive), **`serde-json-core` 0.6**, **`heapless` 0.8** | parse `/save` body + stationboard, fixed-capacity strings |
@@ -432,12 +423,12 @@ exact use (ESP32-S3, WiFi + HUB75 together).**
 Project metadata: **edition 2024**, `rust-version = "1.88"`, built on the **`esp`**
 toolchain (`rust-toolchain.toml`).
 
-> **Scaffold with `esp-generate`.** The ESP-Rust ecosystem moves fast and crate versions
-> must agree (esp-hal ↔ esp-radio ↔ esp-rtos ↔ embassy ↔ esp-hub75). The project was
-> scaffolded with `esp-generate` (ESP32-S3, alloc, unstable HAL, WiFi, Embassy) so the base
-> versions are coherent, then `esp-hub75`, `picoserve`, `reqwless`, and storage were added
-> on top. **Versions are pinned in `Cargo.toml`/`Cargo.lock`** — don't hand-pick mismatched
-> versions; bump them together from a single working `esp-generate` output.
+> **Scaffolded with `esp-generate`.** The ESP-Rust ecosystem moves fast and crate versions
+> must agree (esp-hal ↔ esp-radio ↔ esp-rtos ↔ embassy ↔ esp-hub75). The base was generated
+> with `esp-generate` (ESP32-S3, alloc, unstable HAL, WiFi, Embassy) for a coherent version
+> set, with `esp-hub75`, `picoserve`, `reqwless`, and storage on top. **Versions are pinned
+> in `Cargo.toml`/`Cargo.lock`** — bump them together from a single working `esp-generate`
+> output rather than hand-picking individual versions.
 
 ### 7.2 `esp-hub75` specifics (confirmed from its docs)
 
@@ -464,8 +455,8 @@ on the other (see §7.6):
    `zugli.local` the whole time the device is operating**, so the user can change the stop/
    line at any point without a WiFi reset. On save, persist the selection and signal the
    poll/render tasks to switch to the new connection **live (no reboot)**.
-   - **`mdns_task`** runs alongside it (Phase 2/3, `src/mdns.rs`) so `zugli.local` actually
-     resolves on the home network — a small custom responder, not `edge-mdns` (§3.3).
+   - **`mdns_task`** runs alongside it (Phase 2/3, `src/mdns.rs`) so `zugli.local` resolves
+     on the home network (§3.3).
 4. **`poll_task`** (Phase 3) — every **30 s**: `reqwless` GET the stationboard for the
    saved `stopId`, filter to `(line, destination)`, keep the **next 3** by departure time,
    compute minutes for each, push the result (up to 3 entries) into a shared state cell
@@ -473,17 +464,16 @@ on the other (see §7.6):
 5. **`render_task`** (Phase 3, **pinned to the second core**) — continuously refreshes the
    HUB75 framebuffer from shared state and drives the DMA; redraws text when the value
    changes.
-6. **`button_task`** — polls GPIO0; on a **3 s hold**, clear WiFi creds and reboot (UC3).
+6. **`button_task`** — polls GPIO0; on a **3 s hold**, wipe WiFi creds + connection and reboot (UC3).
 
 ### 7.4 Time sync
 
 After joining WiFi, sync time once via **SNTP** and refresh periodically. The poll task
 uses this Unix time to compute `minutes = (departureTimestamp − now)/60`.
 
-> **As built:** rather than pull in the `sntpc` crate, the firmware uses a **minimal
-> hand-rolled SNTP client** (`src/sntp.rs`) — it sends a single 48-byte NTP request over an
-> `embassy-net` UDP socket to `pool.ntp.org` and reads the transmit timestamp from the
-> reply. `net_ready_task` retries this until it lands, then resyncs hourly.
+The SNTP client (`src/sntp.rs`) is a minimal one: it sends a single 48-byte NTP request
+over an `embassy-net` UDP socket to `pool.ntp.org` and reads the transmit timestamp from
+the reply. `net_ready_task` retries this until it lands, then resyncs hourly.
 
 ### 7.5 TLS (settled: `embedded-tls`)
 
@@ -492,8 +482,8 @@ The API is **HTTPS-only**, so the firmware needs TLS for its outbound poll. Per 
 with **`TlsVerify::None`** — certificate verification isn't supported in `no_std`, which is
 acceptable for a home device on a trusted network. **Document this in the README.**
 
-> **Two as-built gotchas worth knowing (both pinned in `Cargo.toml` with inline comments):**
-> 1. **`reqwless` needs its `alloc` feature on.** That turns on embedded-tls's `alloc`
+> **Two dependency details that matter (both pinned in `Cargo.toml` with inline comments):**
+> 1. **`reqwless` runs with its `alloc` feature on.** That turns on embedded-tls's `alloc`
 >    feature, which makes `TlsConfig::new()` advertise the RSA-PSS signature schemes.
 >    `transport.opendata.ch` serves an RSA cert and TLS 1.3 requires an RSA-PSS-signed
 >    CertificateVerify — without those schemes advertised the handshake aborts with
@@ -501,8 +491,8 @@ acceptable for a home device on a trusted network. **Document this in the README
 >    actual verification, so merely advertising is enough.)
 > 2. **`der` is pinned to 0.8 with its `heapless` feature.** reqwless 0.14 enables
 >    embedded-tls 0.18's `rustpki` feature, which imports `der`'s `SequenceOf`/`SetOf`
->    (gated behind `heapless`). The feature has to be forced on so that (otherwise unused)
->    PKI module compiles.
+>    (gated behind `heapless`). The feature must be on so that (otherwise unused) PKI module
+>    compiles.
 
 Future hardening (optional, not now): `esp-mbedtls` adds hardware-accelerated TLS with real
 cert verification, but it's a git dependency (not on crates.io) and needs `alloc`. Leave it
@@ -564,19 +554,18 @@ generic "yellow" constant, since the brand colour is a specific copper tone.
 
 ### 7.8 Persistence (NVS / flash)
 
-Store two records in flash so they survive reboots and are managed independently:
+Store two records in flash so they survive reboots and can be written independently. Both
+are **cleared together by UC3** (the 3 s BOOT hold):
 
-- **WiFi credentials** — written in Phase 1; **cleared by UC3** (BOOT 3 s hold).
+- **WiFi credentials** — written in Phase 1.
 - **Connection selection** — the `/save` payload from §4.4; written in Phase 2.
 
-> **As built (`src/storage.rs`):** `sequential-storage` was **not** used. Instead the
-> firmware does a **raw read-modify-write** of a single 4096-byte sector at the start of the
-> `nvs` data partition (located via `esp-bootloader-esp-idf`'s partition table reader),
-> through the `embedded-storage` NOR-flash traits on `esp-storage`'s `FlashStorage`. Both
-> records live in **one** `Persisted { wifi, selection }` struct serialised with
-> `serde-json-core` behind a magic + length header — an earlier two-sector layout read back
-> empty after reboot, so everything is kept in the proven sector 0. Clearing WiFi (UC3)
-> rewrites the record with `wifi: None`, leaving the selection intact.
+Storage (`src/storage.rs`) is a **raw read-modify-write** of a single 4096-byte sector at
+the start of the `nvs` data partition (located via `esp-bootloader-esp-idf`'s partition
+table reader), through the `embedded-storage` NOR-flash traits on `esp-storage`'s
+`FlashStorage`. Both records live in **one** `Persisted { wifi, selection }` struct
+serialised with `serde-json-core` behind a magic + length header. The BOOT-button reset
+(UC3) rewrites the record empty, wiping both fields.
 
 On boot: if WiFi creds exist → join home WiFi (STA). Once on the network, the
 `config_server_task` and mDNS responder come up and **stay up** (config page always
@@ -584,12 +573,13 @@ reachable at `zugli.local`). If a connection selection exists → start polling/
 immediately; if not → show the idle screen prompting setup (and showing the address, §7.7).
 If no WiFi creds exist → Phase 1 captive portal.
 
-### 7.9 BOOT-button WiFi reset (UC3)
+### 7.9 BOOT-button factory reset (UC3)
 
-`button_task` reads GPIO0. On a continuous **3 s hold**: clear the stored WiFi credentials
-**only** (leave the saved connection selection intact), then **reboot**. The device comes
-back up with no WiFi → Phase 1 captive portal; once re-joined to a network it resumes the
-same connection. (GPIO0 is the BOOT strapping pin; it's a normal input after boot, so this
+`button_task` reads GPIO0. On a continuous **3 s hold**: wipe **both** stored records — the
+WiFi credentials **and** the saved connection — then **reboot**. The device comes back up
+with nothing saved → Phase 1 captive portal; once re-joined to a network it has no
+connection selected, so it shows the idle/address screen (§7.7) until the user picks a stop
+and line again. (GPIO0 is the BOOT strapping pin; it's a normal input after boot, so this
 is purely a software behaviour.)
 
 ---
@@ -606,19 +596,18 @@ Everything below is decided — build to these, no further confirmation needed.
   1/32-scan 64×64 panel (address lines A–E, E required). No virtual-panel remapping. (§3.1–3.2)
 - ✅ **(2) Setup hotspot → open network** (no password). `Zügli-Setup` is open; users tap to
   join. (§5.1)
-- ✅ **(3) Device address → `zugli.local` (mDNS), with the raw IP as a fallback.** Because
-  the device only gets its home-network IP *after* it joins (i.e. after it has left the
-  captive portal), the IP can't be shown on the setup success screen. Instead, **the device
-  renders `zugli.local` and its IP on the LED panel** whenever it's joined WiFi but has no
+- ✅ **(3) Device address → `zugli.local` (mDNS), with the raw IP as a fallback.** The mDNS
+  responder (§3.3, `src/mdns.rs`) makes `zugli.local` resolve once the device is on the home
+  network. Because the device only gets its home-network IP *after* it joins (i.e. after it
+  has left the captive portal), the IP can't be shown on the setup success screen. Instead,
+  **the device renders its IP on the LED panel** whenever it's joined WiFi but has no
   connection selected yet (§7.7). The captive success screen tells the user to try
   `zugli.local` and to check the device's screen for the IP if that fails. (§3.3, §5.1, §7.7)
-  **As built, mDNS is implemented (§3.3, `src/mdns.rs`), so `zugli.local` resolves; the IP on
-  the panel is the fallback.**
 - ✅ **(4) TLS → `embedded-tls` with `TlsVerify::None`** (no certificate verification) for the
   outbound API poll. Document the trade-off in the README. Hardening to `esp-mbedtls` is a
   possible future step, not required now. (§7.5)
-- ✅ **(5) BOOT reset → clears WiFi credentials only**, leaving the saved connection intact, so
-  the device resumes the same connection after re-joining a network. (§7.9)
+- ✅ **(5) BOOT reset → wipes everything** (WiFi credentials *and* the saved connection), so the
+  device comes back fully unconfigured: captive portal first, then a fresh stop/line pick. (§7.9)
 - ✅ **(6) Departure times → real-time when available, else scheduled.** Use
   `stop.prognosis.departure` (live/delayed) when present; otherwise `stop.departureTimestamp`.
   Apply this in both the phone preview and the firmware. (§6.2)

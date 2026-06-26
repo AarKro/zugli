@@ -272,12 +272,13 @@ can change the stop/line whenever you like without resetting anything (brief §2
 
 ---
 
-## Part 7 — Resetting WiFi (UC3)
+## Part 7 — Factory reset (UC3)
 
-To move the device to a different network: **hold the BOOT button for 3+ seconds**. This
-clears the stored WiFi credentials **only** — your saved stop/connection is kept — and the
-device reboots back into the `Zügli-Setup` captive portal (Part 6.1). Once it rejoins a
-network, it resumes the same connection (brief §7.9, §8-5).
+To wipe the device back to its out-of-the-box state: **hold the BOOT button for 3+
+seconds**. This clears **both** the stored WiFi credentials **and** the saved
+stop/connection, then reboots back into the `Zügli-Setup` captive portal (Part 6.1). After
+you rejoin a network you'll need to pick your stop and line again (Part 6.3) — nothing from
+the previous setup is kept (brief §7.9, §8-5).
 
 ---
 
@@ -305,4 +306,4 @@ network, it resumes the same connection (brief §7.9, §8-5).
 5. `cd firmware && cargo run` to flash (Part 5).
 6. Join `Zügli-Setup` → enter home WiFi → reconnect phone → open `zugli.local` (or the IP
    shown on the panel) → pick stop/line → Save (Part 6).
-7. Hold BOOT 3 s to reset WiFi later (Part 7).
+7. Hold BOOT 3 s for a full factory reset (WiFi + saved connection) later (Part 7).

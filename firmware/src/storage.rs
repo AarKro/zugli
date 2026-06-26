@@ -167,11 +167,16 @@ impl Store {
         self.write_all(&all)
     }
 
-    /// Clear WiFi credentials only, leaving the saved selection intact (UC3, brief §7.9).
+    /// Clear WiFi credentials only, leaving the saved selection intact.
     pub fn clear_wifi(&mut self) -> Result<(), ()> {
         let mut all = self.read_all();
         all.wifi = None;
         self.write_all(&all)
+    }
+
+    /// Wipe everything — WiFi credentials *and* the saved connection (UC3, brief §7.9).
+    pub fn clear_all(&mut self) -> Result<(), ()> {
+        self.write_all(&Persisted::default())
     }
 
     pub fn load_selection(&mut self) -> Option<Selection> {
