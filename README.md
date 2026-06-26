@@ -86,9 +86,11 @@ on physical hardware, so the items below are flagged for on-device verification:
 - **WiFi + HUB75 flicker** (brief §7.6) is mitigated structurally — the render loop is
   pinned to the second core and `esp-hub75`'s `iram` feature is on — but the pixel clock
   and the optional 74HCT245 level shifter may still need tuning on real hardware.
-- **mDNS (`zugli.local`) is not yet implemented.** The device advertises its address via
-  the **IP shown on the LED panel** (the idle screen, brief §7.7), which is the documented
-  fallback. Adding an `edge-mdns` responder is a clean follow-up.
+- **mDNS (`zugli.local`)** is served by a small custom responder (`src/mdns.rs`, not the
+  `edge-mdns` crate) that joins `224.0.0.251:5353`, announces, and answers `A` queries for
+  `zugli.local` with the device's live IP. The **IP shown on the LED panel** (the idle
+  screen, brief §7.7) remains the fallback for phones/networks where mDNS is flaky. Worth
+  exercising against real iOS/Android/desktop resolvers.
 - **Captive-portal DHCP/DNS** use the `edge-dhcp` packet codec and a tiny custom DNS
   responder driven over embassy-net UDP sockets; the DHCP reply is broadcast to `:68`. This
   path should be exercised against a real phone.

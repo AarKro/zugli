@@ -30,6 +30,7 @@ use static_cell::ConstStaticCell;
 
 use firmware::display::{self, Hub75Peripherals};
 use firmware::httpd::config_server_task;
+use firmware::mdns::mdns_task;
 use firmware::model::DisplayState;
 use firmware::poll::poll_task;
 use firmware::shared::{self, DISPLAY, SELECTION, SELECTION_CHANGED};
@@ -168,6 +169,7 @@ async fn main(spawner: Spawner) -> ! {
 
             spawner.spawn(net_ready_task(stack).unwrap());
             spawner.spawn(config_server_task(stack).unwrap());
+            spawner.spawn(mdns_task(stack).unwrap());
             spawner.spawn(poll_task(stack, seed).unwrap());
         }
     }

@@ -249,13 +249,11 @@ This is the on-device flow once flashed. No code, just a phone.
 1. After it reboots, **reconnect your phone to your normal home WiFi** (the device won't be
    broadcasting `Zügli-Setup` anymore). There's no automatic cross-network redirect — you
    switch networks manually (brief §5.1).
-2. Look at the **LED panel**. While it has no connection selected yet, it displays the
-   device's current **IP address** (e.g. `192.168.1.42`). Type **`http://<that IP>`** into
-   your phone's browser (brief §7.7).
-
-   > ⚠️ **mDNS (`zugli.local`) is not implemented in the current firmware**, so
-   > `http://zugli.local` will **not** resolve yet — use the IP from the panel. (Adding an
-   > `edge-mdns` responder is a planned follow-up; brief §3.3.)
+2. Open **`http://zugli.local`** in your phone's browser (mDNS) (brief §3.3).
+3. **If `zugli.local` doesn't resolve** (mDNS can be flaky on some phones/networks), look at
+   the **LED panel** — while it has no connection selected yet, it displays the device's
+   current **IP address** (e.g. `192.168.1.42`). Type **`http://<that IP>`** into the
+   browser instead (brief §3.3, §7.7).
 
 ### 6.3 Pick your stop and connection (Phase 2 — UC2)
 
@@ -292,7 +290,7 @@ network, it resumes the same connection (brief §7.9, §8-5).
 | Flicker / colour glitches **during** WiFi polls | Timing contention — ensure the firmware's `iram` feature is on and the render loop is pinned to the second core (brief §7.6). |
 | Flicker / wrong colours even when idle | Looks electrical — add the **74HCT245** level shifter (Part 2.3) and/or tune the pixel clock (brief §7.6). |
 | Board not detected when flashing | Try the other USB-C port; use a data cable; install CP210x/CH34x driver; force download mode (Part 5.3). |
-| `zugli.local` won't open | Expected — **mDNS isn't implemented yet**; use the **IP shown on the panel** instead (Part 6.2 / brief §3.3, §7.7). |
+| `zugli.local` won't open | mDNS can be flaky on some phones/networks — use the **IP shown on the panel** instead (Part 6.2 / brief §3.3, §7.7). |
 | `unknown target triple 'xtensa'` or `libclang` error | Source the `export-esp` script for your shell, then rebuild (Part 4.2 / brief §11). |
 | Panel shows `2 Schlieren --` / "no service" | No matching departure on the board right now — normal off-hours; it refreshes next poll (brief §7.7). |
 
@@ -305,6 +303,6 @@ network, it resumes the same connection (brief §7.9, §8-5).
 3. Connect 5 V/5 A PSU to panel, USB to ESP32 (Part 3).
 4. Install toolchain once (Part 4).
 5. `cd firmware && cargo run` to flash (Part 5).
-6. Join `Zügli-Setup` → enter home WiFi → reconnect phone → open the **IP shown on the
-   panel** (mDNS/`zugli.local` not implemented yet) → pick stop/line → Save (Part 6).
+6. Join `Zügli-Setup` → enter home WiFi → reconnect phone → open `zugli.local` (or the IP
+   shown on the panel) → pick stop/line → Save (Part 6).
 7. Hold BOOT 3 s to reset WiFi later (Part 7).

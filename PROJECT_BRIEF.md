@@ -139,11 +139,12 @@ WiFi but has no connection selected yet** (see §7.7) — that is how the user d
 fallback address. The captive-portal success screen tells the user to try `zugli.local`
 first and to check the device's screen for its IP if that fails.
 
-> ⚠️ **As built: mDNS is NOT implemented yet.** The `edge-mdns` responder was planned but
-> not built, so **`zugli.local` does not currently resolve** — the user must use the **IP
-> shown on the LED panel** (§7.7). The hostname constant (`HOSTNAME = "zugli"`) and the
-> on-panel IP fallback are in place; adding an `edge-mdns` responder in `config_server_task`
-> is a clean follow-up. Until then, treat the IP as the *primary* address, not the fallback.
+> **As built: mDNS is implemented** by a small custom responder (`src/mdns.rs`, spawned in
+> STA mode), **not** the `edge-mdns` crate. It joins the `224.0.0.251:5353` multicast
+> group, sends a couple of unsolicited announcements, and answers `A` queries for
+> `zugli.local` with the device's live DHCP address — so `http://zugli.local` resolves on
+> the home network. The on-panel IP (§7.7) stays as the fallback for phones/networks where
+> mDNS is flaky.
 
 ---
 
@@ -402,9 +403,9 @@ exact use (ESP32-S3, WiFi + HUB75 together).**
 > `firmware/Cargo.toml`, with the resolved versions from `Cargo.lock`. Where the as-built
 > choice differs from the original plan, the "Notes" column says so. The single biggest
 > deltas from the first draft: the scaffold now sits on **`esp-rtos`** (the current
-> `esp-generate` template's Embassy integration), and three concerns — captive DNS, SNTP,
-> and flash storage — were hand-rolled instead of using the edge-net / `sntpc` /
-> `sequential-storage` crates. **mDNS was not implemented** (see note below the table).
+> `esp-generate` template's Embassy integration), and four concerns — captive DNS, mDNS,
+> SNTP, and flash storage — were hand-rolled instead of using the edge-net / `sntpc` /
+> `sequential-storage` crates.
 
 | Concern | Crate (version) | Notes |
 |---|---|---|
@@ -417,7 +418,7 @@ exact use (ESP32-S3, WiFi + HUB75 together).**
 | TLS (for HTTPS API) | **`embedded-tls` 0.18** (via reqwless) + **`der` 0.8** pinned | `TlsVerify::None` (§7.5). `der` is pinned explicitly with its `heapless` feature so embedded-tls's `rustpki` module compiles — see the comment in `Cargo.toml`. |
 | DHCP (Phase 1 AP) | **`edge-dhcp` 0.8** | Used as a **packet codec** driven over an `embassy-net` UDP socket (`portal::dhcp_task`), **not** as a standalone server. Still the thing that hands the phone a `192.168.4.x` address. |
 | Captive DNS (Phase 1 AP) | **custom UDP responder** (`portal::dns_task`) | `edge-captive` was **not** used — a tiny hand-rolled catch-all answers every query with `192.168.4.1`. |
-| mDNS responder (Phase 2/3 STA) | **not implemented** | `edge-mdns` was planned but **not built**. `zugli.local` does **not** resolve; the device advertises its address by rendering its IP on the panel (§7.7). Clean follow-up. |
+| mDNS responder (Phase 2/3 STA) | **custom responder** (`src/mdns.rs`) | `edge-mdns` was **not** used — a hand-rolled responder (same spirit as the captive DNS) joins `224.0.0.251:5353`, announces, and answers `A` queries for `zugli.local`, so the name resolves on the home network. The on-panel IP (§7.7) remains as a fallback. |
 | Display driver | **`esp-hub75` 0.11** (liebman) | DMA HUB75 driver on embedded-graphics; `iram` feature on |
 | Graphics | **`embedded-graphics` 0.8** | primitives + text |
 | Fonts | **built-in embedded-graphics mono fonts** | `u8g2-fonts` was **not** added |
@@ -463,6 +464,8 @@ on the other (see §7.6):
    `zugli.local` the whole time the device is operating**, so the user can change the stop/
    line at any point without a WiFi reset. On save, persist the selection and signal the
    poll/render tasks to switch to the new connection **live (no reboot)**.
+   - **`mdns_task`** runs alongside it (Phase 2/3, `src/mdns.rs`) so `zugli.local` actually
+     resolves on the home network — a small custom responder, not `edge-mdns` (§3.3).
 4. **`poll_task`** (Phase 3) — every **30 s**: `reqwless` GET the stationboard for the
    saved `stopId`, filter to `(line, destination)`, keep the **next 3** by departure time,
    compute minutes for each, push the result (up to 3 entries) into a shared state cell
@@ -609,8 +612,8 @@ Everything below is decided — build to these, no further confirmation needed.
   renders `zugli.local` and its IP on the LED panel** whenever it's joined WiFi but has no
   connection selected yet (§7.7). The captive success screen tells the user to try
   `zugli.local` and to check the device's screen for the IP if that fails. (§3.3, §5.1, §7.7)
-  **As built, mDNS is not yet implemented (§3.3) — the IP shown on the panel is currently the
-  only working address; the `zugli.local` half is a planned follow-up.**
+  **As built, mDNS is implemented (§3.3, `src/mdns.rs`), so `zugli.local` resolves; the IP on
+  the panel is the fallback.**
 - ✅ **(4) TLS → `embedded-tls` with `TlsVerify::None`** (no certificate verification) for the
   outbound API poll. Document the trade-off in the README. Hardening to `esp-mbedtls` is a
   possible future step, not required now. (§7.5)
