@@ -15,7 +15,9 @@ use embassy_futures::select::{Either, select};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
-use embedded_graphics::mono_font::ascii::{FONT_5X7, FONT_6X10, FONT_9X15};
+// Latin-1 (ISO-8859-1) font variants — same glyphs/metrics as the `ascii` ones, but with
+// the Western-European accented range (ä ö ü Ä Ö Ü ß …) needed for Swiss station names.
+use embedded_graphics::mono_font::iso_8859_1::{FONT_5X7, FONT_6X10, FONT_9X15};
 use embedded_graphics::mono_font::{MonoTextStyle, MonoTextStyleBuilder};
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Line, PrimitiveStyle, Rectangle};
