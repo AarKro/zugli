@@ -135,13 +135,6 @@
     background:linear-gradient(rgba(0,0,0,0) 50%, rgba(0,0,0,.22) 50%);
     background-size:100% 3px;opacity:.32;border-radius:8px;
   }
-  .led-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
-    color:var(--accent);text-shadow:0 0 8px rgba(184,118,72,.65);font-size:clamp(15px,4.3vw,21px);}
-  .led-row .ln{font-weight:700;color:var(--accent-bright);margin-right:10px;}
-  .led-row .dest{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;letter-spacing:.02em;}
-  .led-row .min{font-weight:700;font-variant-numeric:tabular-nums;}
-  .led-row.next{font-size:clamp(20px,6vw,30px);}
-  .led-row.dim{opacity:.62;}
   .live-tag{
     position:absolute;top:14px;right:16px;display:flex;align-items:center;gap:7px;
     font-family:"Archivo",sans-serif;font-size:11px;letter-spacing:.14em;color:var(--muted);text-transform:uppercase;
@@ -154,7 +147,7 @@
 
   /* ---------- big statement ---------- */
   .statement{text-align:center;}
-  .statement h2{font-size:clamp(30px,5.4vw,60px);font-weight:700;max-width:18ch;margin:0 auto;line-height:1.08;}
+  .statement h2{font-size:clamp(30px,5.4vw,60px);font-weight:700;max-width:20ch;margin:0 auto;line-height:1.08;}
   .statement h2 b{color:var(--accent);font-weight:700;}
   .statement p{max-width:54ch;margin:26px auto 0;color:#bdb5a9;font-size:clamp(16px,2vw,19px);}
 
@@ -167,25 +160,13 @@
   .feature h3{font-size:clamp(24px,3.4vw,34px);margin-bottom:16px;}
   .feature p{color:#bdb5a9;font-size:17px;max-width:42ch;}
   .feature .tag{font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:14px;}
+  /* a feature with no media: one centred column */
+  .feature.solo{grid-template-columns:1fr;text-align:center;}
+  .feature.solo .feat-text{max-width:54ch;margin:0 auto;}
+  .feature.solo h3{max-width:24ch;margin-left:auto;margin-right:auto;}
+  .feature.solo p{max-width:none;}
 
-  /* ---------- image / media placeholders ---------- */
-  .media{
-    position:relative;border-radius:var(--radius-lg);overflow:hidden;
-    background:linear-gradient(145deg,#211f1c,#100e0c);
-    border:1px solid var(--line);
-  }
-  .media img{width:100%;height:100%;object-fit:cover;}
-  .ph{
-    aspect-ratio:4/3;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
-    border:1px dashed rgba(184,118,72,.4);border-radius:var(--radius-lg);
-    background:
-      radial-gradient(120% 100% at 50% 0,rgba(184,118,72,.10),transparent 60%),
-      linear-gradient(145deg,#211f1c,#100e0c);
-    color:var(--muted);text-align:center;padding:24px;
-  }
-  .ph svg{width:40px;height:40px;color:rgba(184,118,72,.6);}
-  .ph .ph-label{font-size:13px;letter-spacing:.04em;}
-  .ph .ph-sub{font-size:11px;color:rgba(92,85,76,.8);}
+  /* ---------- feature image ---------- */
   .feat-img{display:block;margin:0 auto;max-width:100%;max-height:540px;width:auto;height:auto;
     filter:drop-shadow(0 30px 60px rgba(0,0,0,.55));}
 
@@ -324,11 +305,11 @@
         <div>
           <!-- SIGNATURE VISUAL: a live simulation of the real 64×64 HUB75 LED matrix,
                rendered dot-by-dot on a canvas. -->
-          <div class="led-panel" role="img" aria-label="A 64 by 64 LED matrix: a Swiss tram rolls along the rails under the overhead wire while a departure board scrolls line 2 to Schlieren in 4, 16 and 28 minutes">
+          <div class="led-panel" role="img" aria-label="A 64 by 64 LED matrix: two Swiss trams pass each other on parallel tracks under the overhead wires, one running left, the other right">
             <div class="live-tag"><span class="live-dot"></span>live</div>
             <canvas class="led-canvas" width="576" height="576" aria-hidden="true"></canvas>
           </div>
-          <p class="panel-caption">The next three departures of the one line you care about.</p>
+          <p class="panel-caption">A single 64×64 panel — the same one Zügli lights up on your shelf.</p>
         </div>
       </div>
     </div>
@@ -340,7 +321,7 @@
 <!-- ============ THE IDEA ============ -->
 <section id="idea" class="statement">
   <div class="wrap">
-    <h2 class="reveal">One stop. One connection. <b>One number that matters.</b></h2>
+    <h2 class="reveal">One stop. <br/>One connection.<br/><b>One number that matters.</b></h2>
     <p class="reveal">
       Departure apps drown you in every line, every platform, every direction. Zügli
       does the opposite. You pick the single connection you actually take, and it shows
@@ -355,21 +336,13 @@
 <section>
   <div class="wrap">
 
-    <div class="feature reveal">
+    <div class="feature solo reveal">
       <div class="feat-text">
         <p class="tag">Live data</p>
         <h3>Real Swiss times, refreshed every 30 seconds.</h3>
         <p>Zügli polls the official <strong>transport.opendata.ch</strong> API for your stop,
         keeps the next three departures of your connection, and uses the real-time delayed
         time when there is one. The number on the panel is the number on the platform.</p>
-      </div>
-      <div class="feat-media">
-        <!-- IMAGE SLOT: finished Zügli on a shelf / by the door. Replace the .ph block with <img>. -->
-        <div class="ph">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M7 13h4M7 16h7"/></svg>
-          <span class="ph-label">Your photo: Zügli in place</span>
-          <span class="ph-sub">drop an image into /site/img and swap this block</span>
-        </div>
       </div>
     </div>
 
@@ -652,125 +625,73 @@
       ctx.globalCompositeOperation='source-over';
     }
 
-    // ---- crisp pixel text, sampled once from a real font into a 1-bit bitmap ----
-    function sampleText(text, fpx, alphaCut){
-      try{
-        var oc=document.createElement('canvas'), c=oc.getContext('2d');
-        c.font='700 '+fpx+'px "Space Mono", ui-monospace, monospace';
-        var tw=Math.ceil(c.measureText(text).width)+2;
-        oc.width=tw; oc.height=fpx+6;
-        c=oc.getContext('2d');
-        c.font='700 '+fpx+'px "Space Mono", ui-monospace, monospace';
-        c.textBaseline='top'; c.fillStyle='#fff';
-        c.fillText(text,1,1);
-        var d=c.getImageData(0,0,oc.width,oc.height).data;
-        var rows=[], top=oc.height, bot=-1;
-        for(var y=0;y<oc.height;y++){
-          var row=new Uint8Array(oc.width), any=false;
-          for(var x=0;x<oc.width;x++){
-            if(d[(y*oc.width+x)*4+3] > (alphaCut||110)){ row[x]=1; any=true; }
-          }
-          rows.push(row);
-          if(any){ if(y<top)top=y; if(y>bot)bot=y; }
-        }
-        if(bot<top) return null;
-        var crop=[]; for(var y=top;y<=bot;y++) crop.push(rows[y]);
-        return {w:oc.width, h:crop.length, rows:crop};
-      }catch(e){ return null; }
-    }
-
-    // scrolling departure board across the bottom
-    var MARQ_TEXT = "ZÜRICH HB    LINIE 2  →  SCHLIEREN     4'      16'      28'        ";
-    var marq=null;
-    function drawMarquee(off, bandTop){
-      if(!marq) return;
-      var w=marq.w;
-      for(var x=0;x<W;x++){
-        var sx=(((off+x)%w)+w)%w;
-        for(var y=0;y<marq.h;y++){ if(marq.rows[y][sx]) px(x, bandTop+y, ACC); }
-      }
-    }
-
-    // big countdown in the middle — the one number you read across the room
-    var bigSeq=[4,3,2,1], bigCache={n:null,bmp:null};
-    function drawCountdown(now, midY){
-      var n = reduce ? 4 : bigSeq[Math.floor(now/3400)%bigSeq.length];
-      if(bigCache.n!==n){ bigCache.n=n; bigCache.bmp=sampleText(n+"'",16,120); }
-      var b=bigCache.bmp; if(!b) return;
-      var ox=(W-b.w)>>1, oy=midY-(b.h>>1);
-      for(var y=0;y<b.h;y++) for(var x=0;x<b.w;x++){
-        if(b.rows[y][x]) px(ox+x, oy+y, ACCH);
-      }
-    }
-
-    // ---- the tram (drawn front-first, moving right to left) ----
-    function bogie(x,y){
+    // ---- the tram, drawn nose-first; dir<0 runs left, dir>0 runs right (mirrored) ----
+    var TW=28;                                   // tram length in LEDs
+    function bogie(P,x,y){
       var K=[0.04,0.03,0.02];
-      hline(x,x+4,y,ACCD);
-      px(x+1,y+1,K); px(x+1,y+2,K);
-      px(x+3,y+1,K); px(x+3,y+2,K);
+      for(var i=0;i<5;i++) P(x+i,y,ACCD);
+      P(x+1,y+1,K); P(x+1,y+2,K); P(x+3,y+1,K); P(x+3,y+2,K);
     }
-    function drawTram(ox, top){
-      var w=28;
-      // body, with a sloped nose on the leading (left) edge
+    function drawTram(ox, top, dir){
+      var w=TW;
+      // local plot helpers — flip horizontally when running right so the nose leads
+      function P(lx,ly,c,a){ px(dir>0 ? ox+(w-1-lx) : ox+lx, ly, c, a); }
+      function S(lx,ly,c){ set(dir>0 ? ox+(w-1-lx) : ox+lx, ly, c); }
+      function HL(x0,x1,y,c){ for(var x=x0;x<=x1;x++) P(x,y,c); }
+      // body with a sloped nose at local x=0 (the leading edge)
       for(var x=0;x<w;x++){
         var bt = top+1;
         if(x===0) bt=top+4; else if(x===1) bt=top+2; else if(x===2) bt=top+1;
-        for(var y=bt;y<=top+11;y++) px(ox+x,y, ACC);
+        for(var y=bt;y<=top+11;y++) P(x,y, ACC);
       }
-      hline(ox+2,ox+w-2, top+1, ACCH);       // roof highlight
-      hline(ox+1,ox+w-2, top+11, ACCD);      // skirt shadow
-      // dark glass windows (overwrite body) with thin mullions
+      HL(2,w-2, top+1, ACCH);                    // roof highlight
+      HL(1,w-2, top+11, ACCD);                   // skirt shadow
+      // dark glass windows with thin mullions
       var GLASS=[0.06,0.05,0.04], LITWIN=[0.85,0.78,0.55];
       for(var x=8;x<w-2;x++){
-        if((x-8)%3!==2){ for(var y=top+3;y<=top+6;y++) set(ox+x,y, GLASS); }
+        if((x-8)%3!==2){ for(var y=top+3;y<=top+6;y++) S(x,y, GLASS); }
       }
-      // one lit interior window for warmth
-      for(var y=top+3;y<=top+5;y++){ set(ox+10,y,LITWIN); set(ox+11,y,LITWIN); }
+      for(var y=top+3;y<=top+5;y++){ S(10,y,LITWIN); S(11,y,LITWIN); }   // a lit window
       // front route blind: a lit "2" on a dark sign
       var SG=[[1,1,1],[0,0,1],[1,1,1],[1,0,0],[1,1,1]];
       for(var y=0;y<5;y++) for(var x=0;x<3;x++)
-        set(ox+3+x, top+3+y, SG[y][x] ? [1,0.82,0.42] : [0.05,0.04,0.03]);
+        S(3+x, top+3+y, SG[y][x] ? [1,0.82,0.42] : [0.05,0.04,0.03]);
       // headlight on the nose
-      px(ox, top+8, WHITE); px(ox, top+9, WHITE); px(ox, top+10, ACCH);
-      px(ox+1, top+9, [0.95,0.85,0.6]);
+      P(0, top+8, WHITE); P(0, top+9, WHITE); P(0, top+10, ACCH);
+      P(1, top+9, [0.95,0.85,0.6]);
       // pantograph reaching up to the wire
-      px(ox+w-9, top, ACCH); px(ox+w-9, top-1, ACCD);
-      hline(ox+w-11, ox+w-7, top-2, ACCD);
+      P(w-9, top, ACCH); P(w-9, top-1, ACCD); HL(w-11, w-7, top-2, ACCD);
       // bogies
-      bogie(ox+3, top+12); bogie(ox+18, top+12);
+      bogie(P, 3, top+12); bogie(P, 18, top+12);
     }
 
-    // ---- scene geometry ----
-    var WIRE_Y=5, TRAM_TOP=8, RAIL_Y=22, MID_Y=37, MARQ_TOP=49;
-    function drawTrack(){
-      hline(0,W-1, WIRE_Y, WIRE);                 // catenary / overhead wire
-      for(var x=0;x<W;x+=8) px(x, WIRE_Y+1, WIRE, 0.6);   // droppers
-      hline(0,W-1, RAIL_Y, RAIL);                 // rail
-      for(var x=2;x<W;x+=5){ px(x, RAIL_Y+1, SLEEP); }    // sleepers
+    // ---- two tracks, one above the other, trains passing in opposite directions ----
+    function drawWire(y){ hline(0,W-1,y,WIRE); for(var x=0;x<W;x+=8) px(x,y+1,WIRE,0.6); }
+    function drawRail(y){ hline(0,W-1,y,RAIL); for(var x=2;x<W;x+=5) px(x,y+1,SLEEP); }
+    var WIRE_A=8,  TRAM_A=11, RAIL_A=26,          // upper track — runs left
+        WIRE_B=34, TRAM_B=37, RAIL_B=52;          // lower track — runs right
+
+    // x of a train, or null while it is off-stage between passes
+    var SPAN=W+TW;
+    function trainX(now, phase, move, cycle, dir){
+      var tm=(((now+phase)%cycle)+cycle)%cycle;
+      if(tm>=move) return null;
+      var f=tm/move;
+      return Math.round(dir<0 ? W - f*SPAN : -TW + f*SPAN);
     }
 
-    var span=W+34, moveMs=6200, gapMs=2600, cycle=moveMs+gapMs;
     function frame(now){
       clearFB();
-      drawTrack();
-      var tm = reduce ? 2200 : (now % cycle);
-      if(tm < moveMs){
-        var f = tm/moveMs;
-        drawTram(Math.round(W - f*span), TRAM_TOP);
+      drawWire(WIRE_A); drawRail(RAIL_A);
+      drawWire(WIRE_B); drawRail(RAIL_B);
+      if(reduce){
+        drawTram(33, TRAM_A, -1);                 // settled static frame
+        drawTram(3,  TRAM_B, +1);
+      } else {
+        var xa=trainX(now, 0,    6000, 8400, -1); if(xa!==null) drawTram(xa, TRAM_A, -1);
+        var xb=trainX(now, 4300, 6800, 8800, +1); if(xb!==null) drawTram(xb, TRAM_B, +1);
       }
-      drawCountdown(now, MID_Y);
-      drawMarquee(reduce ? 0 : Math.floor(now*0.020), MARQ_TOP);
       paint();
-    }
-
-    // ---- build marquee (retry once fonts are ready) and run ----
-    marq = sampleText(MARQ_TEXT, 9);
-    if(document.fonts && document.fonts.ready){
-      document.fonts.ready.then(function(){
-        var m=sampleText(MARQ_TEXT, 9); if(m) marq=m;
-        bigCache.n=null;                       // rebuild big digits with real font
-      });
     }
 
     if(reduce){ frame(2200); return; }           // single, settled static frame
