@@ -135,14 +135,7 @@
     background:linear-gradient(rgba(0,0,0,0) 50%, rgba(0,0,0,.22) 50%);
     background-size:100% 3px;opacity:.32;border-radius:8px;
   }
-  .live-tag{
-    position:absolute;top:14px;right:16px;display:flex;align-items:center;gap:7px;
-    font-family:"Archivo",sans-serif;font-size:11px;letter-spacing:.14em;color:var(--muted);text-transform:uppercase;
-  }
-  .live-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);
-    animation:pulse 1.8s ease-in-out infinite;}
   @keyframes pulse{0%,100%{opacity:.35;}50%{opacity:1;}}
-  @media (prefers-reduced-motion:reduce){.live-dot{animation:none;}}
   .panel-caption{text-align:center;margin-top:18px;font-size:13px;color:var(--muted);}
 
   /* ---------- big statement ---------- */
@@ -306,7 +299,6 @@
           <!-- SIGNATURE VISUAL: a live simulation of the real 64×64 HUB75 LED matrix,
                rendered dot-by-dot on a canvas. -->
           <div class="led-panel" role="img" aria-label="A 64 by 64 LED matrix: two Swiss trams pass each other on parallel tracks under the overhead wires, one running left, the other right">
-            <div class="live-tag"><span class="live-dot"></span>live</div>
             <canvas class="led-canvas" width="576" height="576" aria-hidden="true"></canvas>
           </div>
           <p class="panel-caption">A single 64×64 panel — the same one Zügli lights up on your shelf.</p>
