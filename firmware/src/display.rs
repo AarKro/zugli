@@ -18,7 +18,7 @@ use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
 // Latin-1 (ISO-8859-1) font variants — same glyphs/metrics as the `ascii` ones, but with
 // the Western-European accented range (ä ö ü Ä Ö Ü ß …) needed for Swiss station names.
-use embedded_graphics::mono_font::iso_8859_1::{FONT_5X7, FONT_6X10, FONT_9X15};
+use embedded_graphics::mono_font::iso_8859_1::{FONT_5X7, FONT_6X10, FONT_10X20};
 use embedded_graphics::mono_font::{MonoTextStyle, MonoTextStyleBuilder};
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Line, PrimitiveStyle, Rectangle};
@@ -97,7 +97,7 @@ const fn brand(r: u8, g: u8, b_: u8) -> Color {
 pub const ACCENT: Color = brand(0xAA, 0x4A, 0x10); // deep copper — primary accent / structure
 const AMBER: Color = brand(0xFF, 0xA8, 0x00); // departure-board amber — primary readable text
 const DIM: Color = brand(0x74, 0x4A, 0x1E); // muted copper — secondary text / labels
-const SURFACE: Color = Color::new(0x0E, 0x0C, 0x0A); // dark text on the copper badge
+const OFF: Color = Color::new(0, 0, 0); // fully unlit — LEDs stay dark (e.g. badge digit cut-outs)
 
 // Animation cadence for the scrolling title. The render task redraws at ~20 fps while a
 // title needs scrolling; `HOLD_FRAMES` is the pause (~5 s) before and after each round.
@@ -276,6 +276,13 @@ fn left(fb: &mut FBType, s: &str, x: i32, y: i32, st: MonoTextStyle<'static, Col
     let _ = Text::with_baseline(s, Point::new(x, y), st, Baseline::Top).draw(fb);
 }
 
+/// Draw `s` horizontally centred at baseline-top `y`. `char_w` is the font's per-character
+/// advance (e.g. 5 for `FONT_5X7`, 6 for `FONT_6X10`).
+fn centered(fb: &mut FBType, s: &str, y: i32, st: MonoTextStyle<'static, Color>, char_w: i32) {
+    let x = (COLS as i32 - s.chars().count() as i32 * char_w) / 2;
+    left(fb, s, x, y, st);
+}
+
 /// Dispatch on the current state and draw it. Returns `true` if the screen is animating
 /// (a scrolling title) and should be redrawn on the next frame tick.
 pub fn draw_state(fb: &mut FBType, state: &DisplayState, frame: u32) -> bool {
@@ -341,9 +348,10 @@ const TW: i32 = 28; // tram length in LEDs (matches the site)
 const CONNECT_SPAN: i32 = COLS as i32 + TW; // travel: fully off-left → fully off-right
 /// Frames for one full pass of the tram (~2.4 s at [`FRAME_MS`]).
 pub const CONNECT_CYCLE_FRAMES: u32 = 48;
-const TRAIN_TOP: i32 = 26; // body-top row; wire sits above, rail below
-const WIRE_Y: i32 = 20;
-const RAIL_Y: i32 = 42;
+// The scene sits in the lower part of the panel, leaving room for the "Connecting" label up top.
+const TRAIN_TOP: i32 = 34; // body-top row; wire sits above, rail below
+const WIRE_Y: i32 = 28;
+const RAIL_Y: i32 = 50;
 
 /// `true` once the connecting animation has completed at least one full pass (frame numbers
 /// `0..CONNECT_CYCLE_FRAMES` make up one pass, so the last frame of it is `… - 1`).
@@ -377,6 +385,9 @@ fn bogie(fb: &mut FBType, ox: i32, lx: i32, ly: i32) {
 
 /// Draw one frame of the connecting animation. Always returns `true` (always animating).
 fn draw_connecting(fb: &mut FBType, frame: u32) -> bool {
+    // Label at the top so the user knows what's happening while WiFi comes up.
+    centered(fb, "Connecting", 6, style(&FONT_5X7, AMBER), 5);
+
     // Catenary wire above, running rail with sleepers below.
     rule(fb, WIRE_Y, WIRE);
     rule(fb, RAIL_Y, RAIL);
@@ -471,11 +482,12 @@ fn draw_offline(fb: &mut FBType) {
     left(fb, "offline", 2, 28, dim);
 }
 
-/// Runtime departures screen, in two halves. The **top** is the journey: the stop name in
-/// copper, then an arrow to the destination in cream ("Stop  →  Schlieren"). The **bottom** is
-/// the timing: the line badge (tram/bus/train number), then the next departure large on the
-/// left and the one after it smaller on the right under a quiet "then" label. Returns `true`
-/// while a heading is mid-scroll so the render loop keeps ticking frames.
+/// Runtime departures screen, in two halves. The **top** is the journey: the full stop name
+/// (with its city), an arrow, then the destination — all in amber. The **bottom** is the
+/// timing: a centred amber line badge (tram/bus/train number, digits unlit for contrast), the
+/// next departure in big copper figures on the left, and the one after it smaller in amber on
+/// the right. Only the rules and the arrow are copper. Returns `true` while a heading is
+/// mid-scroll so the render loop keeps ticking frames.
 fn draw_departures(
     fb: &mut FBType,
     station: &str,
@@ -487,33 +499,36 @@ fn draw_departures(
         return false;
     }
 
-    // --- Top: the journey — which stop we're at, and where the saved line is headed. ---
-    let station_name = strip_city(station);
+    // --- Top: the journey — which stop we're at, and where the saved line is headed. The full
+    // names (city included) are kept so the connection is unambiguous whatever was configured.
     let scroll_station =
-        draw_marquee(fb, station_name, 1, 0, COLS as i32 - 2, style(&FONT_6X10, ACCENT), 6, frame);
+        draw_marquee(fb, station, 1, 0, COLS as i32 - 2, style(&FONT_6X10, AMBER), 6, frame);
     rule(fb, 11, ACCENT);
 
-    // Destination preceded by a right arrow ("→ Schlieren"). The arrow is drawn after the text
-    // so a long, scrolling destination slides behind it rather than over it.
-    let dest = strip_city(deps[0].destination.as_str());
+    // Destination preceded by a copper arrow. The arrow is drawn after the text so a long,
+    // scrolling destination slides behind it rather than over it.
+    let dest = deps[0].destination.as_str();
     let scroll_dest =
         draw_marquee(fb, dest, 10, 14, COLS as i32 - 11, style(&FONT_5X7, AMBER), 5, frame);
     arrow(fb, 1, 15, ACCENT);
-    rule(fb, 23, DIM);
+    rule(fb, 23, ACCENT);
 
     // --- Bottom: the line and its next two departures. ---
-    // Line badge (tram/bus/train number) anchors the times to the connection.
-    let _ = draw_badge(fb, deps[0].line.as_str(), 1, 26, ACCENT, SURFACE);
+    // Line badge (tram/bus/train number), centred: amber block with the digits left UNLIT so
+    // they read as clean cut-outs (lit digits on a lit block smear together on the panel).
+    let line = deps[0].line.as_str();
+    let badge_w = line.chars().count() as i32 * 6 + 5;
+    let _ = draw_badge(fb, line, (COLS as i32 - badge_w) / 2, 26, AMBER, OFF);
 
-    // Next departure — large, on the left.
-    left(fb, &fmt_minutes(deps[0].minutes), 2, 44, style(&FONT_9X15, ACCENT));
+    // Next departure — big copper figures on the left (its bottom row is 42 + 20 = 62).
+    left(fb, &fmt_minutes(deps[0].minutes), 4, 42, style(&FONT_10X20, ACCENT));
 
-    // The one after — smaller, on the right, under a quiet "then" label.
+    // The one after — smaller amber figures on the right, bottom-aligned with the big figure
+    // (y = 62 − 10) and nudged 2 px in from the edge so neither number hugs the side.
     if let Some(after) = deps.get(1) {
         let t = fmt_minutes(after.minutes);
-        let tx = COLS as i32 - t.chars().count() as i32 * 6 - 2;
-        left(fb, "then", COLS as i32 - 4 * 5 - 2, 28, style(&FONT_5X7, DIM));
-        left(fb, &t, tx, 49, style(&FONT_6X10, AMBER));
+        let tx = COLS as i32 - t.chars().count() as i32 * 6 - 4;
+        left(fb, &t, tx, 52, style(&FONT_6X10, AMBER));
     }
 
     scroll_station || scroll_dest
@@ -570,6 +585,7 @@ fn draw_badge(fb: &mut FBType, line: &str, x: i32, y: i32, fill: Color, text: Co
 /// Draw `text` at baseline-top `(x0, y)`. If it fits within `avail` pixels it sits flush at
 /// `x0`; otherwise it scrolls as a seamless marquee — paused ~5 s at the start, then one full
 /// round, repeat. Returns `true` when it is scrolling (so the caller keeps ticking frames).
+#[allow(clippy::too_many_arguments)] // a layout helper: position, width, style and frame all matter
 fn draw_marquee(
     fb: &mut FBType,
     text: &str,
@@ -593,15 +609,6 @@ fn draw_marquee(
     left(fb, text, x0 - offset, y, st);
     left(fb, text, x0 - offset + period, y, st);
     true
-}
-
-/// Drop a leading "City, " prefix from a destination so only the place name is shown
-/// (e.g. "Zürich, Klusplatz" → "Klusplatz"). Names without that prefix are left untouched.
-fn strip_city(dest: &str) -> &str {
-    match dest.split_once(", ") {
-        Some((_, rest)) if !rest.is_empty() => rest,
-        _ => dest,
-    }
 }
 
 /// Allocate the two framebuffers as `'static` and return them. Call once.
