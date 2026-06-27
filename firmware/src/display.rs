@@ -312,10 +312,7 @@ pub fn draw_state(fb: &mut FBType, state: &DisplayState, frame: u32) -> bool {
             false
         }
         DisplayState::Connecting => draw_connecting(fb, frame),
-        DisplayState::IdleAddress { octets } => {
-            draw_idle(fb, *octets);
-            false
-        }
+        DisplayState::IdleAddress { octets } => draw_idle(fb, *octets, frame),
         DisplayState::Departures { station, deps } => draw_departures(fb, station, deps, frame),
         DisplayState::Offline => {
             draw_offline(fb);
@@ -480,17 +477,19 @@ fn draw_connecting(fb: &mut FBType, frame: u32) -> bool {
     true
 }
 
-fn draw_idle(fb: &mut FBType, octets: [u8; 4]) {
+fn draw_idle(fb: &mut FBType, octets: [u8; 4], frame: u32) -> bool {
     let accent = style(&FONT_5X7, ACCENT);
     let dim = style(&FONT_5X7, DIM);
-    // Two evenly-spaced label/value sections: the mDNS name and the IP, each on its own line
-    // (both fit the 64-px width in this 5-px font, so neither needs to wrap).
+    // Two evenly-spaced label/value sections: the mDNS name (fixed length) and the IP.
     left(fb, "Open:", 2, 12, dim);
     left(fb, "zugli.local", 2, 20, accent);
     left(fb, "or IP:", 2, 38, dim);
     let mut ip: String<16> = String::new();
     let _ = write!(ip, "{}.{}.{}.{}", octets[0], octets[1], octets[2], octets[3]);
-    left(fb, ip.as_str(), 2, 46, accent);
+    // The IP varies by network and can be wider than the panel; scroll it as a marquee when it
+    // doesn't fit (a too-long line would otherwise just clip — it never crashes). Returns
+    // whether it's scrolling so the render loop keeps ticking frames.
+    draw_marquee(fb, ip.as_str(), 2, 46, COLS as i32 - 2, accent, 5, frame)
 }
 
 fn draw_offline(fb: &mut FBType) {
