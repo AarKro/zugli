@@ -91,11 +91,13 @@ const fn brand(r: u8, g: u8, b_: u8) -> Color {
     Color::new(r, g, b_)
 }
 
-/// Brand copper (#B87648) (brief §7.7 — not a generic "yellow").
-pub const ACCENT: Color = brand(0xB8, 0x76, 0x48);
-const DIM: Color = brand(0x5C, 0x55, 0x4C); // --muted, secondary text
-const CREAM: Color = brand(0xF5, 0xEF, 0xE6); // --cream, primary text
-const SURFACE: Color = Color::new(0x0E, 0x0C, 0x0A); // --surface, dark text on the copper badge
+// Deep, saturated copper — kept dark and low-blue on purpose: on the HUB75 panel any colour
+// with the blue/green channels riding high washes out to white, so the palette stays heavily
+// red-weighted to read as real copper rather than a pale tan.
+pub const ACCENT: Color = brand(0xAA, 0x4A, 0x10); // deep copper — primary accent / structure
+const AMBER: Color = brand(0xFF, 0xA8, 0x00); // departure-board amber — primary readable text
+const DIM: Color = brand(0x74, 0x4A, 0x1E); // muted copper — secondary text / labels
+const SURFACE: Color = Color::new(0x0E, 0x0C, 0x0A); // dark text on the copper badge
 
 // Animation cadence for the scrolling title. The render task redraws at ~20 fps while a
 // title needs scrolling; `HOLD_FRAMES` is the pause (~5 s) before and after each round.
@@ -318,21 +320,22 @@ fn draw_provisioning(fb: &mut FBType) {
 // full pass before it cuts over to the board, and keeps looping if the join takes longer.
 // ---------------------------------------------------------------------------------------
 
-// Tram palette (full-strength RGB, scaled by the global brightness), matching the site's
-// warm copper / cream scene.
-const T_BODY: Color = brand(0xDB, 0x8C, 0x52); // copper body
-const T_HI: Color = brand(0xF7, 0xA8, 0x66); // roof / highlight
-const T_DK: Color = brand(0x6B, 0x40, 0x21); // skirt shadow / pantograph
-const T_WHITE: Color = brand(0xFF, 0xFA, 0xEB); // headlight
-const T_GLOW: Color = brand(0xF2, 0xD9, 0x99); // headlight spill
-const T_GLASS: Color = brand(0x12, 0x0E, 0x0A); // dark windows
-const T_LITWIN: Color = brand(0xD9, 0xC7, 0x8C); // one lit window
-const T_BLIND: Color = brand(0xFF, 0xD1, 0x6B); // lit route-blind glyph
-const T_BLIND_BG: Color = brand(0x0D, 0x0A, 0x08); // route-blind background
-const T_WHEEL: Color = brand(0x0A, 0x08, 0x05); // bogie wheels
-const WIRE: Color = brand(0x4D, 0x38, 0x29); // catenary
-const RAIL: Color = brand(0x8C, 0x66, 0x42); // running rail
-const SLEEP: Color = brand(0x33, 0x21, 0x14); // sleepers
+// Tram palette — the same deep-copper + amber scheme as the rest of the panel: copper for the
+// bodywork/structure (low blue so it stays saturated, not white), amber for the lit elements
+// (headlight, windows, the route-blind "Z").
+const T_BODY: Color = brand(0xBE, 0x56, 0x14); // deep copper body
+const T_HI: Color = brand(0xDE, 0x74, 0x1C); // roof / highlight (lighter copper)
+const T_DK: Color = brand(0x58, 0x26, 0x08); // skirt shadow / pantograph
+const T_HEAD: Color = brand(0xFF, 0xBE, 0x3C); // headlight (warm amber)
+const T_GLOW: Color = brand(0xE0, 0x86, 0x10); // headlight spill (amber)
+const T_GLASS: Color = brand(0x10, 0x0A, 0x05); // dark windows
+const T_LITWIN: Color = brand(0xF0, 0x9C, 0x00); // one lit window (amber)
+const T_BLIND: Color = brand(0xFF, 0xA8, 0x00); // lit route-blind glyph (amber)
+const T_BLIND_BG: Color = brand(0x0D, 0x09, 0x04); // route-blind background
+const T_WHEEL: Color = brand(0x0A, 0x06, 0x03); // bogie wheels
+const WIRE: Color = brand(0x3E, 0x24, 0x0A); // catenary (deep copper)
+const RAIL: Color = brand(0x90, 0x4E, 0x16); // running rail (copper)
+const SLEEP: Color = brand(0x2C, 0x16, 0x06); // sleepers
 
 const TW: i32 = 28; // tram length in LEDs (matches the site)
 const CONNECT_SPAN: i32 = COLS as i32 + TW; // travel: fully off-left → fully off-right
@@ -429,8 +432,8 @@ fn draw_connecting(fb: &mut FBType, frame: u32) -> bool {
     }
 
     // Headlight on the nose.
-    tp(fb, ox, 0, top + 8, T_WHITE);
-    tp(fb, ox, 0, top + 9, T_WHITE);
+    tp(fb, ox, 0, top + 8, T_HEAD);
+    tp(fb, ox, 0, top + 9, T_HEAD);
     tp(fb, ox, 0, top + 10, T_HI);
     tp(fb, ox, 1, top + 9, T_GLOW);
 
@@ -468,10 +471,11 @@ fn draw_offline(fb: &mut FBType) {
     left(fb, "offline", 2, 28, dim);
 }
 
-/// Runtime departures screen. A header band — copper rule, the station name, copper rule —
-/// sits at the top; below it the connection (destination + a copper line badge) and the next
-/// two departure times. Returns `true` while a heading is mid-scroll so the loop keeps
-/// animating. Colours are the Zügli palette: cream for primary text, copper for accents.
+/// Runtime departures screen, in two halves. The **top** is the journey: the stop name in
+/// copper, then an arrow to the destination in cream ("Stop  →  Schlieren"). The **bottom** is
+/// the timing: the line badge (tram/bus/train number), then the next departure large on the
+/// left and the one after it smaller on the right under a quiet "then" label. Returns `true`
+/// while a heading is mid-scroll so the render loop keeps ticking frames.
 fn draw_departures(
     fb: &mut FBType,
     station: &str,
@@ -483,28 +487,49 @@ fn draw_departures(
         return false;
     }
 
-    // Header band: the station name (title) framed by a rule above and below it, in copper.
-    rule(fb, 0, ACCENT);
+    // --- Top: the journey — which stop we're at, and where the saved line is headed. ---
     let station_name = strip_city(station);
-    let scroll_station = draw_marquee(fb, station_name, 2, style(&FONT_6X10, ACCENT), 6, frame);
-    rule(fb, 13, ACCENT);
+    let scroll_station =
+        draw_marquee(fb, station_name, 1, 0, COLS as i32 - 2, style(&FONT_6X10, ACCENT), 6, frame);
+    rule(fb, 11, ACCENT);
 
-    // Subtitle: where the saved line is heading (city prefix dropped), smaller, in cream.
+    // Destination preceded by a right arrow ("→ Schlieren"). The arrow is drawn after the text
+    // so a long, scrolling destination slides behind it rather than over it.
     let dest = strip_city(deps[0].destination.as_str());
-    let scroll_dest = draw_marquee(fb, dest, 15, style(&FONT_5X7, CREAM), 5, frame);
+    let scroll_dest =
+        draw_marquee(fb, dest, 10, 14, COLS as i32 - 11, style(&FONT_5X7, AMBER), 5, frame);
+    arrow(fb, 1, 15, ACCENT);
+    rule(fb, 23, DIM);
 
-    // Line label on its OWN full-width row, so it has room regardless of length — a tram
-    // number ("2"), a train ("S12", "IC"), or a bus ("N13") all fit here, where they didn't
-    // when squeezed next to the time. Copper badge, dark text.
-    draw_badge(fb, deps[0].line.as_str(), 1, 22, ACCENT, SURFACE);
+    // --- Bottom: the line and its next two departures. ---
+    // Line badge (tram/bus/train number) anchors the times to the connection.
+    let _ = draw_badge(fb, deps[0].line.as_str(), 1, 26, ACCENT, SURFACE);
 
-    // The next two departures, large, in copper.
-    left(fb, &fmt_minutes(deps[0].minutes), 2, 35, style(&FONT_9X15, ACCENT));
-    if let Some(next) = deps.get(1) {
-        left(fb, &fmt_minutes(next.minutes), 2, 50, style(&FONT_9X15, ACCENT));
+    // Next departure — large, on the left.
+    left(fb, &fmt_minutes(deps[0].minutes), 2, 44, style(&FONT_9X15, ACCENT));
+
+    // The one after — smaller, on the right, under a quiet "then" label.
+    if let Some(after) = deps.get(1) {
+        let t = fmt_minutes(after.minutes);
+        let tx = COLS as i32 - t.chars().count() as i32 * 6 - 2;
+        left(fb, "then", COLS as i32 - 4 * 5 - 2, 28, style(&FONT_5X7, DIM));
+        left(fb, &t, tx, 49, style(&FONT_6X10, AMBER));
     }
 
     scroll_station || scroll_dest
+}
+
+/// A small right-pointing arrow (a 7×5 glyph) with its top-left at `(x, y)`.
+fn arrow(fb: &mut FBType, x: i32, y: i32, c: Color) {
+    for i in 0..6 {
+        pset(fb, x + i, y + 2, c); // shaft
+    }
+    // chevron head
+    pset(fb, x + 4, y, c);
+    pset(fb, x + 5, y + 1, c);
+    pset(fb, x + 6, y + 2, c);
+    pset(fb, x + 5, y + 3, c);
+    pset(fb, x + 4, y + 4, c);
 }
 
 /// Format minutes-to-departure as the panel shows it: `--` (no service), `now`, or `N'`.
@@ -542,20 +567,22 @@ fn draw_badge(fb: &mut FBType, line: &str, x: i32, y: i32, fill: Color, text: Co
     x + w
 }
 
-/// Draw `text` at baseline-top `y`. If it fits, it sits flush left; otherwise it scrolls as
-/// a seamless marquee — paused ~5 s at the default position, then one full round, repeat.
-/// Returns `true` when it is scrolling (so the caller keeps ticking frames).
+/// Draw `text` at baseline-top `(x0, y)`. If it fits within `avail` pixels it sits flush at
+/// `x0`; otherwise it scrolls as a seamless marquee — paused ~5 s at the start, then one full
+/// round, repeat. Returns `true` when it is scrolling (so the caller keeps ticking frames).
 fn draw_marquee(
     fb: &mut FBType,
     text: &str,
+    x0: i32,
     y: i32,
+    avail: i32,
     st: MonoTextStyle<'static, Color>,
     char_w: i32,
     frame: u32,
 ) -> bool {
     let text_w = text.chars().count() as i32 * char_w;
-    if text_w <= COLS as i32 - 1 {
-        left(fb, text, 1, y, st);
+    if text_w <= avail {
+        left(fb, text, x0, y, st);
         return false;
     }
     const GAP: i32 = 14; // blank space between the end of the text and its wrapped copy
@@ -563,8 +590,8 @@ fn draw_marquee(
     let phase = frame % (HOLD_FRAMES + period as u32);
     // 1 px per frame once the initial hold has elapsed.
     let offset = phase.saturating_sub(HOLD_FRAMES) as i32;
-    left(fb, text, 1 - offset, y, st);
-    left(fb, text, 1 - offset + period, y, st);
+    left(fb, text, x0 - offset, y, st);
+    left(fb, text, x0 - offset + period, y, st);
     true
 }
 
