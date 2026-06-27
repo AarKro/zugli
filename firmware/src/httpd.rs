@@ -5,8 +5,11 @@
 //! at any time. On save we persist the selection and signal the poll task to switch live —
 //! no reboot (brief §4.4).
 
+use core::fmt::Write as _;
+
 use embassy_net::Stack;
 use embassy_time::Duration;
+use heapless::String;
 use log::info;
 use picoserve::extract::Json;
 use picoserve::response::{Content, IntoResponse, Response};
@@ -54,6 +57,21 @@ pub fn json(body: &'static str) -> Static {
     }
 }
 
+/// A small owned-body JSON response, for endpoints whose body is built at runtime.
+pub struct OwnedJson<const N: usize>(pub String<N>);
+
+impl<const N: usize> Content for OwnedJson<N> {
+    fn content_type(&self) -> &'static str {
+        "application/json"
+    }
+    fn content_length(&self) -> usize {
+        self.0.len()
+    }
+    async fn write_content<W: Write>(self, mut writer: W) -> Result<(), W::Error> {
+        writer.write_all(self.0.as_bytes()).await
+    }
+}
+
 async fn index() -> impl IntoResponse {
     Response::ok(html(INDEX_HTML))
 }
@@ -83,21 +101,28 @@ async fn save(Json(sel): Json<Selection>) -> impl IntoResponse {
     Response::ok(json("{\"ok\":true}"))
 }
 
-/// Current board settings, for the config page's settings sheet to pre-fill the toggles.
+/// Current board settings, for the config page's settings sheet to pre-fill its controls.
 async fn get_config() -> impl IntoResponse {
-    // Two static bodies keep this allocation-free (the only field is a bool today).
-    let body = if shared::strip_city_enabled() {
-        "{\"stripCity\":true}"
-    } else {
-        "{\"stripCity\":false}"
-    };
-    Response::ok(json(body))
+    let mut body: String<160> = String::new();
+    let _ = write!(
+        body,
+        "{{\"stripCity\":{},\"brightness\":{},\"autoBrightness\":{},\"reducedStart\":{},\"reducedEnd\":{}}}",
+        shared::strip_city_enabled(),
+        shared::brightness_level(),
+        shared::auto_brightness_enabled(),
+        shared::reduced_start_min(),
+        shared::reduced_end_min(),
+    );
+    Response::ok(OwnedJson(body))
 }
 
-/// Apply a settings change: persist it and update the live flag the panel reads. Affects the
-/// board immediately — a re-poll re-emits the departures screen, redrawn with the new setting.
+/// Apply a settings change: persist it and update the live mirror the panel reads. Affects the
+/// board immediately — a re-poll re-emits the departures screen, redrawn with the new settings.
 async fn set_config(Json(cfg): Json<BoardConfig>) -> impl IntoResponse {
-    info!("config: stripCity = {}", cfg.strip_city);
+    info!(
+        "config: stripCity={} brightness={} autoBrightness={} reduced={}..{}",
+        cfg.strip_city, cfg.brightness, cfg.auto_brightness, cfg.reduced_start, cfg.reduced_end
+    );
     {
         let mut guard = STORE.lock().await;
         match guard.as_mut() {
@@ -108,7 +133,7 @@ async fn set_config(Json(cfg): Json<BoardConfig>) -> impl IntoResponse {
             None => log::error!("config: no flash store (setting won't survive reboot)"),
         }
     }
-    shared::set_strip_city(cfg.strip_city);
+    shared::apply_config(&cfg);
     SELECTION_CHANGED.signal(()); // wake the poll task so the panel redraws now
     Response::ok(json("{\"ok\":true}"))
 }

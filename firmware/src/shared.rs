@@ -9,7 +9,7 @@ use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embassy_time::Instant;
 
-use crate::model::{DisplayState, Selection};
+use crate::model::{Config, DisplayState, Selection};
 
 /// Latest thing to show on the panel. The render task waits on this and redraws on change.
 pub static DISPLAY: Signal<CriticalSectionRawMutex, DisplayState> = Signal::new();
@@ -26,18 +26,48 @@ static BOOT_UNIX: AtomicI64 = AtomicI64::new(0);
 /// Device IPv4 once DHCP has assigned one (packed big-endian), `0` = none yet.
 static DEVICE_IP: AtomicU32 = AtomicU32::new(0);
 
-/// Live mirror of [`Config::strip_city`](crate::model::Config), read by the render task each
-/// frame. Set at boot from flash and whenever the config page toggles it.
+// Live mirror of the persisted [`Config`], read by the render task each frame. Set at boot from
+// flash and whenever the config page changes a setting. Plain atomics (no mutex) so the render
+// task never blocks; the reduced-brightness window is packed `start << 16 | end` into one u32.
 static STRIP_CITY: AtomicBool = AtomicBool::new(false);
+static BRIGHTNESS_LEVEL: AtomicU32 = AtomicU32::new(6);
+static AUTO_BRIGHTNESS: AtomicBool = AtomicBool::new(true);
+static REDUCED_WINDOW: AtomicU32 = AtomicU32::new(((20 * 60) << 16) | (8 * 60));
 
-/// Update the "hide city names" setting (from boot load or a config change).
-pub fn set_strip_city(on: bool) {
-    STRIP_CITY.store(on, Ordering::Relaxed);
+/// Push a whole [`Config`] into the live mirror (boot load or a config-page change).
+pub fn apply_config(cfg: &Config) {
+    STRIP_CITY.store(cfg.strip_city, Ordering::Relaxed);
+    BRIGHTNESS_LEVEL.store(cfg.brightness.clamp(1, 10) as u32, Ordering::Relaxed);
+    AUTO_BRIGHTNESS.store(cfg.auto_brightness, Ordering::Relaxed);
+    REDUCED_WINDOW.store(
+        ((cfg.reduced_start as u32) << 16) | cfg.reduced_end as u32,
+        Ordering::Relaxed,
+    );
 }
 
 /// Whether the panel should drop the "City, " prefix from stop/destination names.
 pub fn strip_city_enabled() -> bool {
     STRIP_CITY.load(Ordering::Relaxed)
+}
+
+/// Manual brightness level, 1–10 (× 10 % = panel brightness).
+pub fn brightness_level() -> u8 {
+    BRIGHTNESS_LEVEL.load(Ordering::Relaxed) as u8
+}
+
+/// Whether time-of-day auto-dimming is enabled.
+pub fn auto_brightness_enabled() -> bool {
+    AUTO_BRIGHTNESS.load(Ordering::Relaxed)
+}
+
+/// Start of the reduced-brightness window, minutes since local midnight.
+pub fn reduced_start_min() -> u16 {
+    (REDUCED_WINDOW.load(Ordering::Relaxed) >> 16) as u16
+}
+
+/// End of the reduced-brightness window, minutes since local midnight.
+pub fn reduced_end_min() -> u16 {
+    (REDUCED_WINDOW.load(Ordering::Relaxed) & 0xFFFF) as u16
 }
 
 /// Record the wall clock from an SNTP sample.

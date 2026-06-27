@@ -30,13 +30,40 @@ pub struct WifiCreds {
 }
 
 /// User-tweakable board settings, edited from the config page's settings sheet and persisted
-/// to flash. Defaults are chosen so a fresh board behaves exactly as before any config exists.
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+/// to flash. The container-level `#[serde(default)]` means any field missing from the JSON
+/// (older flash records, or a partial update) falls back to [`Config::default`].
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     /// When `true`, drop the leading "City, " prefix from stop/destination names on the panel
     /// (e.g. "Zürich, Schlieren" → "Schlieren").
-    #[serde(rename = "stripCity", default)]
+    #[serde(rename = "stripCity")]
     pub strip_city: bool,
+    /// Manual brightness level, 1–10, mapping linearly to 10–100 % panel brightness.
+    #[serde(rename = "brightness")]
+    pub brightness: u8,
+    /// When `true`, the panel auto-dims to 10 % during the reduced window (local time);
+    /// otherwise it stays at the manual [`brightness`](Config::brightness) level all day.
+    #[serde(rename = "autoBrightness")]
+    pub auto_brightness: bool,
+    /// Start/end of the reduced-brightness window, as minutes since local midnight (e.g.
+    /// 20:00 = 1200). The window wraps past midnight when `start > end`.
+    #[serde(rename = "reducedStart")]
+    pub reduced_start: u16,
+    #[serde(rename = "reducedEnd")]
+    pub reduced_end: u16,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            strip_city: false,
+            brightness: 6,          // 60 %
+            auto_brightness: true,  // preserve the board's existing night-dimming behaviour
+            reduced_start: 20 * 60, // 20:00
+            reduced_end: 8 * 60,    // 08:00
+        }
+    }
 }
 
 /// One upcoming departure of the saved connection, ready to render (brief §7.7).

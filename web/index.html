@@ -29,7 +29,8 @@
     background:var(--bg); color:var(--cream);
     font-family:'Archivo',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
     font-size:16px; line-height:1.4;
-    -webkit-font-smoothing:antialiased; padding:32px 20px 64px;
+    -webkit-font-smoothing:antialiased;
+    padding:calc(32px + env(safe-area-inset-top)) 20px 64px;
   }
   .wrap{max-width:440px;margin:0 auto;}
   h1{color:var(--accent);font-weight:700;font-size:30px;margin:0 0 28px;letter-spacing:.5px;}
@@ -87,7 +88,10 @@
 
   /* settings cogwheel + mobile bottom-sheet */
   .gear{
-    position:fixed;top:calc(14px + env(safe-area-inset-top));right:14px;z-index:20;
+    /* Stays put on scroll, but at the top it lines up with the <h1> title: the title's line
+       box is 30px×1.4 ≈ 42px tall starting at the body's top padding, so a 44px button anchored
+       1px above that padding is vertically centred on it. Right edge matches the 20px body inset. */
+    position:fixed;top:calc(31px + env(safe-area-inset-top));right:20px;z-index:20;
     width:44px;height:44px;display:flex;align-items:center;justify-content:center;
     background:var(--surface);color:var(--accent);border:none;border-radius:12px;cursor:pointer;
   }
@@ -118,6 +122,16 @@
     background:var(--cream);border-radius:50%;transition:.2s;}
   .switch input:checked + .slider{background:var(--accent);}
   .switch input:checked + .slider::before{transform:translateX(20px);}
+  .opt-col{flex-direction:column;align-items:stretch;gap:10px;}
+  .opt-row{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+  .opt-val{color:var(--accent);font-weight:600;font-variant-numeric:tabular-nums;}
+  .range{width:100%;accent-color:var(--accent);height:28px;margin:0;}
+  .time-row{display:flex;align-items:center;gap:10px;}
+  .time{
+    flex:1;background:var(--cream);color:#1a1410;border:none;border-radius:10px;
+    padding:11px 12px;font-family:inherit;font-size:16px;
+  }
+  .opt + .opt{border-top:1px solid #241d16;}
 </style>
 </head>
 <body>
@@ -141,6 +155,35 @@
         <span class="slider"></span>
       </span>
     </label>
+
+    <div class="opt opt-col">
+      <div class="opt-row">
+        <span class="opt-title">Brightness</span>
+        <span class="opt-val" id="bright-val">60%</span>
+      </div>
+      <input type="range" class="range" id="opt-brightness" min="1" max="10" step="1" value="6" aria-label="Brightness">
+    </div>
+
+    <label class="opt" for="opt-auto">
+      <span class="opt-text">
+        <span class="opt-title">Auto-dim at night</span>
+        <span class="opt-sub muted">Drop to 10% during the time window below.</span>
+      </span>
+      <span class="switch">
+        <input type="checkbox" id="opt-auto">
+        <span class="slider"></span>
+      </span>
+    </label>
+
+    <div class="opt opt-col" id="reduced-window">
+      <span class="opt-title">Dim from</span>
+      <div class="time-row">
+        <input type="time" class="time" id="opt-start" value="20:00" aria-label="Dim from">
+        <span class="muted">to</span>
+        <input type="time" class="time" id="opt-end" value="08:00" aria-label="Dim until">
+      </div>
+    </div>
+
     <p class="note hidden" id="settings-status"></p>
   </div>
 </div>
@@ -358,17 +401,34 @@ $("save").addEventListener("click", async () => {
 });
 
 // ---------- settings sheet (board config: GET/POST /config) ----------
-const sheet = $("settings"), stripToggle = $("opt-stripcity"), setStatus = $("settings-status");
+const sheet = $("settings"), setStatus = $("settings-status");
+const stripToggle = $("opt-stripcity"), brightRange = $("opt-brightness"), brightVal = $("bright-val"),
+      autoToggle = $("opt-auto"), startTime = $("opt-start"), endTime = $("opt-end"), reducedWindow = $("reduced-window");
 let configLoaded = false;
+// The board's current settings; controls mirror this and every change posts the whole object.
+let cfg = { stripCity:false, brightness:6, autoBrightness:true, reducedStart:1200, reducedEnd:480 };
+
+const toMin = (hhmm) => { const [h,m] = hhmm.split(":").map(Number); return h*60 + m; };
+const toHHMM = (min) => `${String(Math.floor(min/60)).padStart(2,"0")}:${String(min%60).padStart(2,"0")}`;
+
+function renderConfig(){
+  stripToggle.checked = !!cfg.stripCity;
+  brightRange.value = cfg.brightness;
+  brightVal.textContent = (cfg.brightness * 10) + "%";
+  autoToggle.checked = !!cfg.autoBrightness;
+  startTime.value = toHHMM(cfg.reducedStart);
+  endTime.value = toHHMM(cfg.reducedEnd);
+  reducedWindow.classList.toggle("hidden", !cfg.autoBrightness); // time window only matters when auto-dim is on
+}
 
 function openSettings(){
   sheet.classList.remove("hidden");
   setStatus.className = "note hidden";
   if (configLoaded) return;
-  // Pre-fill from the board's current settings; leave defaults if it can't be reached.
+  // Pre-fill from the board's current settings; keep the defaults if it can't be reached.
   fetch("/config")
     .then(r => r.json())
-    .then(c => { stripToggle.checked = !!c.stripCity; configLoaded = true; })
+    .then(c => { cfg = { ...cfg, ...c }; configLoaded = true; renderConfig(); })
     .catch(() => {});
 }
 function closeSettings(){ sheet.classList.add("hidden"); }
@@ -378,24 +438,37 @@ $("settings-close").addEventListener("click", closeSettings);
 // Tap the dim backdrop (outside the sheet) to dismiss.
 sheet.addEventListener("click", (e) => { if (e.target === sheet) closeSettings(); });
 
-stripToggle.addEventListener("change", async () => {
-  const val = stripToggle.checked;
+// Apply a control change: snapshot, mutate, push the whole config, and revert the UI on failure.
+async function applyChange(mutate){
+  const prev = { ...cfg };
+  mutate();
+  renderConfig();
   setStatus.className = "note hidden";
   try {
     const r = await fetch("/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stripCity: val }),
+      body: JSON.stringify(cfg),
     });
     if (!r.ok) throw new Error("bad status");
     setStatus.textContent = "Saved — Zügli is updating.";
     setStatus.className = "note ok";
   } catch (_) {
-    stripToggle.checked = !val; // revert the toggle so it reflects the board's real state
+    cfg = prev; renderConfig();
     setStatus.textContent = "Couldn't reach Zügli — try again.";
     setStatus.className = "note err";
   }
-});
+}
+
+stripToggle.addEventListener("change", () => applyChange(() => { cfg.stripCity = stripToggle.checked; }));
+autoToggle.addEventListener("change", () => applyChange(() => { cfg.autoBrightness = autoToggle.checked; }));
+// Live-update the % label while sliding; persist once the user lets go.
+brightRange.addEventListener("input", () => { brightVal.textContent = (brightRange.value * 10) + "%"; });
+brightRange.addEventListener("change", () => applyChange(() => { cfg.brightness = +brightRange.value; }));
+startTime.addEventListener("change", () => { if (startTime.value) applyChange(() => { cfg.reducedStart = toMin(startTime.value); }); });
+endTime.addEventListener("change", () => { if (endTime.value) applyChange(() => { cfg.reducedEnd = toMin(endTime.value); }); });
+
+renderConfig(); // reflect defaults until the board's real config loads
 </script>
 </body>
 </html>

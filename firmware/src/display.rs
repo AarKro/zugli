@@ -43,39 +43,51 @@ const PLANES: usize = 7;
 
 // BRIGHTNESS — the only real dimmer available: the HUB75 driver has no brightness register, so
 // brightness is purely the RGB values we write (Binary Code Modulation). The palette below is
-// defined at FULL strength and scaled down at draw time by [`scaled`], using a brightness that
-// steps between a bright daytime and a dim night-time level from the wall clock.
-const DAY_BRIGHTNESS: u32 = 60; // 08:00–20:00 local: bright enough for daylight
-const NIGHT_BRIGHTNESS: u32 = 10; // 20:00–08:00 local: dim so it isn't glaring at night
-const DAY_START_HOUR: u32 = 8;
-const DAY_END_HOUR: u32 = 20;
+// defined at FULL strength and scaled down at draw time by [`scaled`]. The active percent comes
+// from the user's settings: a manual 1–10 level (× 10 %), optionally auto-dimmed to
+// `REDUCED_BRIGHTNESS` during a configurable local-time window.
+const REDUCED_BRIGHTNESS: u32 = 10; // the dimmed level used inside the auto-dim window
 // Local time = UTC + this offset. Switzerland is UTC+1 (CET); set to 2 for summer time (CEST).
-// DST is not auto-handled, so in summer the day/night boundaries simply shift by an hour — fine
-// for a coarse 12-hour window.
+// DST is not auto-handled, so in summer the window edges simply shift by an hour.
 const LOCAL_UTC_OFFSET_HOURS: i64 = 1;
-// How often a static screen is redrawn so its brightness still tracks the day/night switch.
+// How often a static screen is redrawn so its brightness still tracks the auto-dim window.
 const BRIGHTNESS_REFRESH_SECS: u64 = 60;
 
-/// The brightness percent to use right now, from the synced wall clock. Falls back to daytime
-/// brightness before SNTP has synced (e.g. during the boot animation) so the panel is visible.
+/// The brightness percent to use right now. The manual level always applies; when auto-dim is
+/// on and the synced local time is inside the reduced window, drop to [`REDUCED_BRIGHTNESS`].
+/// Before SNTP has synced (e.g. the boot animation) we can't know the time, so we stay manual.
 fn current_brightness() -> u32 {
-    match crate::shared::now_unix() {
-        Some(unix) => {
-            let hour = ((unix + LOCAL_UTC_OFFSET_HOURS * 3600).rem_euclid(86_400) / 3600) as u32;
-            if (DAY_START_HOUR..DAY_END_HOUR).contains(&hour) {
-                DAY_BRIGHTNESS
-            } else {
-                NIGHT_BRIGHTNESS
-            }
-        }
-        None => DAY_BRIGHTNESS,
+    let base = (crate::shared::brightness_level().clamp(1, 10) as u32) * 10; // 10..=100
+    if !crate::shared::auto_brightness_enabled() {
+        return base;
+    }
+    let Some(unix) = crate::shared::now_unix() else {
+        return base;
+    };
+    let local_min = ((unix + LOCAL_UTC_OFFSET_HOURS * 3600).rem_euclid(86_400) / 60) as u16;
+    if in_window(local_min, crate::shared::reduced_start_min(), crate::shared::reduced_end_min()) {
+        REDUCED_BRIGHTNESS
+    } else {
+        base
+    }
+}
+
+/// Whether `now` (minutes since local midnight) is within the `[start, end)` window, which may
+/// wrap past midnight (`start > end`, e.g. 20:00→08:00). An empty `start == end` window never matches.
+fn in_window(now: u16, start: u16, end: u16) -> bool {
+    if start == end {
+        false
+    } else if start < end {
+        now >= start && now < end
+    } else {
+        now >= start || now < end
     }
 }
 
 /// Brightness percent applied to the frame currently being drawn. Set once per frame at the top
 /// of [`draw_state`] and read by [`scaled`]. Only the single render task touches it, so
 /// `Relaxed` ordering is sufficient.
-static RENDER_BRIGHTNESS: AtomicU32 = AtomicU32::new(DAY_BRIGHTNESS);
+static RENDER_BRIGHTNESS: AtomicU32 = AtomicU32::new(REDUCED_BRIGHTNESS);
 
 /// Scale a full-strength palette colour down to the active brightness. Applied at every draw
 /// choke point ([`style`], [`rule`], [`pset`], and the badge fill) so the whole palette dims
