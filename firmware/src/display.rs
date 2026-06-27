@@ -22,6 +22,7 @@ use embedded_graphics::mono_font::{MonoTextStyle, MonoTextStyleBuilder};
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Line, PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Baseline, Text};
+use embedded_graphics::Pixel;
 use esp_hal::gpio::AnyPin;
 use esp_hal::peripherals::{DMA_CH0, LCD_CAM};
 use esp_hal::time::Rate;
@@ -173,12 +174,26 @@ pub async fn render_task(
         // Render frames of the current state. A static screen is drawn once and then we
         // block for the next state; an animated one (a scrolling title) advances a frame
         // every `FRAME_MS`, but cuts over immediately if a new state arrives.
+        //
+        // The `Connecting` startup animation is the exception: it must play at least one
+        // full pass before switching to the board (or back to the portal). An incoming
+        // state is parked in `pending` and only applied once the tram has cleared the panel.
         let mut frame: u32 = 0;
+        let mut pending: Option<DisplayState> = None;
         loop {
             fb.erase();
             let animating = draw_state(fb, &state, frame);
             tx.signal(fb);
             fb = rx.wait().await;
+            // A state arrived earlier while the connecting animation was mid-pass — apply it
+            // as soon as that pass completes (and keep looping the tram until then).
+            if let Some(next) = pending.take() {
+                if connect_cycle_done(frame) {
+                    state = next;
+                    break;
+                }
+                pending = Some(next);
+            }
             if !animating {
                 state = DISPLAY.wait().await;
                 break;
@@ -186,8 +201,14 @@ pub async fn render_task(
             match select(Timer::after(Duration::from_millis(FRAME_MS)), DISPLAY.wait()).await {
                 Either::First(_) => frame = frame.wrapping_add(1),
                 Either::Second(next) => {
-                    state = next;
-                    break;
+                    // Hold the switch until the tram has finished a full pass; cut over
+                    // immediately for every other state.
+                    if matches!(state, DisplayState::Connecting) && !connect_cycle_done(frame) {
+                        pending = Some(next);
+                    } else {
+                        state = next;
+                        break;
+                    }
                 }
             }
         }
@@ -214,6 +235,7 @@ pub fn draw_state(fb: &mut FBType, state: &DisplayState, frame: u32) -> bool {
             draw_provisioning(fb);
             false
         }
+        DisplayState::Connecting => draw_connecting(fb, frame),
         DisplayState::IdleAddress { octets } => {
             draw_idle(fb, *octets);
             false
@@ -238,6 +260,143 @@ fn draw_provisioning(fb: &mut FBType) {
     left(fb, "then open:", 2, 40, dim);
     // Bottom row — the SoftAP address (fixed at 192.168.4.1, PROJECT_BRIEF.md §5.2).
     left(fb, "192.168.4.1", 2, 55, accent);
+}
+
+// ---------------------------------------------------------------------------------------
+// Startup "connecting" animation — a single Swiss tram rolls left→right across the panel
+// while the board joins WiFi, ported from the product-site LED-board scene (one train, one
+// track). The lit route blind reads "Z" (for Zügli). The render loop guarantees at least one
+// full pass before it cuts over to the board, and keeps looping if the join takes longer.
+// ---------------------------------------------------------------------------------------
+
+// Tram palette (full-strength RGB, scaled by the global brightness), matching the site's
+// warm copper / cream scene.
+const T_BODY: Color = brand(0xDB, 0x8C, 0x52); // copper body
+const T_HI: Color = brand(0xF7, 0xA8, 0x66); // roof / highlight
+const T_DK: Color = brand(0x6B, 0x40, 0x21); // skirt shadow / pantograph
+const T_WHITE: Color = brand(0xFF, 0xFA, 0xEB); // headlight
+const T_GLOW: Color = brand(0xF2, 0xD9, 0x99); // headlight spill
+const T_GLASS: Color = brand(0x12, 0x0E, 0x0A); // dark windows
+const T_LITWIN: Color = brand(0xD9, 0xC7, 0x8C); // one lit window
+const T_BLIND: Color = brand(0xFF, 0xD1, 0x6B); // lit route-blind glyph
+const T_BLIND_BG: Color = brand(0x0D, 0x0A, 0x08); // route-blind background
+const T_WHEEL: Color = brand(0x0A, 0x08, 0x05); // bogie wheels
+const WIRE: Color = brand(0x4D, 0x38, 0x29); // catenary
+const RAIL: Color = brand(0x8C, 0x66, 0x42); // running rail
+const SLEEP: Color = brand(0x33, 0x21, 0x14); // sleepers
+
+const TW: i32 = 28; // tram length in LEDs (matches the site)
+const CONNECT_SPAN: i32 = COLS as i32 + TW; // travel: fully off-left → fully off-right
+/// Frames for one full pass of the tram (~2.4 s at [`FRAME_MS`]).
+pub const CONNECT_CYCLE_FRAMES: u32 = 48;
+const TRAIN_TOP: i32 = 26; // body-top row; wire sits above, rail below
+const WIRE_Y: i32 = 20;
+const RAIL_Y: i32 = 42;
+
+/// `true` once the connecting animation has completed at least one full pass (frame numbers
+/// `0..CONNECT_CYCLE_FRAMES` make up one pass, so the last frame of it is `… - 1`).
+fn connect_cycle_done(frame: u32) -> bool {
+    frame >= CONNECT_CYCLE_FRAMES - 1
+}
+
+/// Set a single pixel, clipped to the panel.
+fn pset(fb: &mut FBType, x: i32, y: i32, c: Color) {
+    if x >= 0 && y >= 0 && x < COLS as i32 && y < ROWS as i32 {
+        let _ = Pixel(Point::new(x, y), c).draw(fb);
+    }
+}
+
+/// Plot a tram-local pixel for a right-running tram whose left edge is at screen x `ox`. The
+/// tram is modelled nose-first (local x=0 is the nose) and mirrored so the nose leads right.
+fn tp(fb: &mut FBType, ox: i32, lx: i32, ly: i32, c: Color) {
+    pset(fb, ox + (TW - 1 - lx), ly, c);
+}
+
+/// One bogie (truck) with two wheelsets, at tram-local `(lx, ly)`.
+fn bogie(fb: &mut FBType, ox: i32, lx: i32, ly: i32) {
+    for i in 0..5 {
+        tp(fb, ox, lx + i, ly, T_DK);
+    }
+    for &wx in &[lx + 1, lx + 3] {
+        tp(fb, ox, wx, ly + 1, T_WHEEL);
+        tp(fb, ox, wx, ly + 2, T_WHEEL);
+    }
+}
+
+/// Draw one frame of the connecting animation. Always returns `true` (always animating).
+fn draw_connecting(fb: &mut FBType, frame: u32) -> bool {
+    // Catenary wire above, running rail with sleepers below.
+    rule(fb, WIRE_Y, WIRE);
+    rule(fb, RAIL_Y, RAIL);
+    let mut sx = 2;
+    while sx < COLS as i32 {
+        pset(fb, sx, RAIL_Y + 1, SLEEP);
+        sx += 5;
+    }
+
+    // Tram x: nose enters from the left, exits on the right; one pass per cycle.
+    let phase = (frame % CONNECT_CYCLE_FRAMES) as i32;
+    let ox = -TW + phase * CONNECT_SPAN / CONNECT_CYCLE_FRAMES as i32;
+    let top = TRAIN_TOP;
+
+    // Body, with a sloped nose at the leading (local x=0) edge.
+    for lx in 0..TW {
+        let bt = match lx {
+            0 => top + 4,
+            1 => top + 2,
+            _ => top + 1,
+        };
+        for ly in bt..=top + 11 {
+            tp(fb, ox, lx, ly, T_BODY);
+        }
+    }
+    for lx in 2..=TW - 2 {
+        tp(fb, ox, lx, top + 1, T_HI); // roof highlight
+    }
+    for lx in 1..=TW - 2 {
+        tp(fb, ox, lx, top + 11, T_DK); // skirt shadow
+    }
+
+    // Dark glass windows with thin mullions, plus one lit window.
+    for lx in 8..TW - 2 {
+        if (lx - 8) % 3 != 2 {
+            for ly in top + 3..=top + 6 {
+                tp(fb, ox, lx, ly, T_GLASS);
+            }
+        }
+    }
+    for ly in top + 3..=top + 5 {
+        tp(fb, ox, 10, ly, T_LITWIN);
+        tp(fb, ox, 11, ly, T_LITWIN);
+    }
+
+    // Front route blind: a lit "Z" (for Zügli) on a dark sign.
+    const Z: [[u8; 3]; 5] = [[1, 1, 1], [0, 0, 1], [0, 1, 0], [1, 0, 0], [1, 1, 1]];
+    for (gy, row) in Z.iter().enumerate() {
+        for (gx, &on) in row.iter().enumerate() {
+            let c = if on == 1 { T_BLIND } else { T_BLIND_BG };
+            tp(fb, ox, 3 + gx as i32, top + 3 + gy as i32, c);
+        }
+    }
+
+    // Headlight on the nose.
+    tp(fb, ox, 0, top + 8, T_WHITE);
+    tp(fb, ox, 0, top + 9, T_WHITE);
+    tp(fb, ox, 0, top + 10, T_HI);
+    tp(fb, ox, 1, top + 9, T_GLOW);
+
+    // Pantograph reaching up toward the wire.
+    tp(fb, ox, TW - 9, top, T_HI);
+    tp(fb, ox, TW - 9, top - 1, T_DK);
+    for lx in TW - 11..=TW - 7 {
+        tp(fb, ox, lx, top - 2, T_DK);
+    }
+
+    // Bogies.
+    bogie(fb, ox, 3, top + 12);
+    bogie(fb, ox, 18, top + 12);
+
+    true
 }
 
 fn draw_idle(fb: &mut FBType, octets: [u8; 4]) {

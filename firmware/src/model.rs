@@ -48,6 +48,10 @@ pub type Departures = Vec<Departure, 3>;
 pub enum DisplayState {
     /// Phase 1: no WiFi saved, captive portal is up.
     Provisioning,
+    /// Startup/loading animation: a tram rolls across the panel while the board joins WiFi
+    /// in the background. The render loop plays at least one full pass before cutting over
+    /// to whatever comes next (the board, or back to [`Provisioning`] if the join failed).
+    Connecting,
     /// Joined WiFi but no connection selected yet: show the address so the user can
     /// reach the config page (brief §3.3 / §7.7). `octets` is the device IPv4.
     IdleAddress { octets: [u8; 4] },

@@ -152,6 +152,10 @@ async fn main(spawner: Spawner) -> ! {
         Some(creds) => {
             // ---------------- Phase 2 + 3: connected ----------------
             info!("zugli: joining {}", creds.ssid.as_str());
+            // Startup animation while the radio associates + DHCP/SNTP come up in the
+            // background. The render task replaces it with the board (idle address or
+            // departures) once those land, after at least one full pass of the tram.
+            DISPLAY.signal(DisplayState::Connecting);
             let mut controller = controller;
             let _ = wifi::apply_sta(&mut controller, &creds);
 
