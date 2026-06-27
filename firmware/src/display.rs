@@ -10,6 +10,7 @@
 //! (brief §7.7).
 
 use core::fmt::Write as _;
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use embassy_futures::select::{Either, select};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -40,21 +41,57 @@ pub const COLS: usize = 64;
 const NROWS: usize = compute_rows(ROWS);
 const PLANES: usize = 7;
 
-// GLOBAL BRIGHTNESS — the only real dimmer available: the HUB75 driver has no brightness
-// register, so brightness is purely the RGB values we write (Binary Code Modulation). This
-// percent scales the whole palette. Lower = dimmer. Tune to taste.
-const BRIGHTNESS: u32 = 10;
+// BRIGHTNESS — the only real dimmer available: the HUB75 driver has no brightness register, so
+// brightness is purely the RGB values we write (Binary Code Modulation). The palette below is
+// defined at FULL strength and scaled down at draw time by [`scaled`], using a brightness that
+// steps between a bright daytime and a dim night-time level from the wall clock.
+const DAY_BRIGHTNESS: u32 = 60; // 08:00–20:00 local: bright enough for daylight
+const NIGHT_BRIGHTNESS: u32 = 10; // 20:00–08:00 local: dim so it isn't glaring at night
+const DAY_START_HOUR: u32 = 8;
+const DAY_END_HOUR: u32 = 20;
+// Local time = UTC + this offset. Switzerland is UTC+1 (CET); set to 2 for summer time (CEST).
+// DST is not auto-handled, so in summer the day/night boundaries simply shift by an hour — fine
+// for a coarse 12-hour window.
+const LOCAL_UTC_OFFSET_HOURS: i64 = 1;
+// How often a static screen is redrawn so its brightness still tracks the day/night switch.
+const BRIGHTNESS_REFRESH_SECS: u64 = 60;
 
-/// Scale one channel by [`BRIGHTNESS`] (const so the palette stays compile-time constants).
-const fn b(channel: u8) -> u8 {
-    ((channel as u32 * BRIGHTNESS) / 100) as u8
+/// The brightness percent to use right now, from the synced wall clock. Falls back to daytime
+/// brightness before SNTP has synced (e.g. during the boot animation) so the panel is visible.
+fn current_brightness() -> u32 {
+    match crate::shared::now_unix() {
+        Some(unix) => {
+            let hour = ((unix + LOCAL_UTC_OFFSET_HOURS * 3600).rem_euclid(86_400) / 3600) as u32;
+            if (DAY_START_HOUR..DAY_END_HOUR).contains(&hour) {
+                DAY_BRIGHTNESS
+            } else {
+                NIGHT_BRIGHTNESS
+            }
+        }
+        None => DAY_BRIGHTNESS,
+    }
 }
-/// A Zügli brand colour (full-strength RGB) scaled to the global brightness.
+
+/// Brightness percent applied to the frame currently being drawn. Set once per frame at the top
+/// of [`draw_state`] and read by [`scaled`]. Only the single render task touches it, so
+/// `Relaxed` ordering is sufficient.
+static RENDER_BRIGHTNESS: AtomicU32 = AtomicU32::new(DAY_BRIGHTNESS);
+
+/// Scale a full-strength palette colour down to the active brightness. Applied at every draw
+/// choke point ([`style`], [`rule`], [`pset`], and the badge fill) so the whole palette dims
+/// uniformly with the time of day.
+fn scaled(c: Color) -> Color {
+    let pct = RENDER_BRIGHTNESS.load(Ordering::Relaxed);
+    let s = |ch: u8| ((ch as u32 * pct) / 100) as u8;
+    Color::new(s(c.r()), s(c.g()), s(c.b()))
+}
+
+/// A Zügli brand colour at full strength (dimmed to the active brightness when drawn).
 const fn brand(r: u8, g: u8, b_: u8) -> Color {
-    Color::new(b(r), b(g), b(b_))
+    Color::new(r, g, b_)
 }
 
-/// Brand copper (#B87648), brightness-scaled (brief §7.7 — not a generic "yellow").
+/// Brand copper (#B87648) (brief §7.7 — not a generic "yellow").
 pub const ACCENT: Color = brand(0xB8, 0x76, 0x48);
 const DIM: Color = brand(0x5C, 0x55, 0x4C); // --muted, secondary text
 const CREAM: Color = brand(0xF5, 0xEF, 0xE6); // --cream, primary text
@@ -195,7 +232,17 @@ pub async fn render_task(
                 pending = Some(next);
             }
             if !animating {
-                state = DISPLAY.wait().await;
+                // A static screen blocks for the next state, but also wakes periodically so it
+                // is redrawn at the current brightness when the day/night threshold is crossed.
+                match select(
+                    Timer::after(Duration::from_secs(BRIGHTNESS_REFRESH_SECS)),
+                    DISPLAY.wait(),
+                )
+                .await
+                {
+                    Either::First(_) => {}
+                    Either::Second(next) => state = next,
+                }
                 break;
             }
             match select(Timer::after(Duration::from_millis(FRAME_MS)), DISPLAY.wait()).await {
@@ -220,7 +267,7 @@ pub async fn render_task(
 // ---------------------------------------------------------------------------------------
 
 fn style(font: &'static embedded_graphics::mono_font::MonoFont<'static>, color: Color) -> MonoTextStyle<'static, Color> {
-    MonoTextStyleBuilder::new().font(font).text_color(color).build()
+    MonoTextStyleBuilder::new().font(font).text_color(scaled(color)).build()
 }
 
 fn left(fb: &mut FBType, s: &str, x: i32, y: i32, st: MonoTextStyle<'static, Color>) {
@@ -230,6 +277,8 @@ fn left(fb: &mut FBType, s: &str, x: i32, y: i32, st: MonoTextStyle<'static, Col
 /// Dispatch on the current state and draw it. Returns `true` if the screen is animating
 /// (a scrolling title) and should be redrawn on the next frame tick.
 pub fn draw_state(fb: &mut FBType, state: &DisplayState, frame: u32) -> bool {
+    // Pick the brightness for this frame once; every colour is scaled to it via `scaled`.
+    RENDER_BRIGHTNESS.store(current_brightness(), Ordering::Relaxed);
     match state {
         DisplayState::Provisioning => {
             draw_provisioning(fb);
@@ -302,7 +351,7 @@ fn connect_cycle_done(frame: u32) -> bool {
 /// Set a single pixel, clipped to the panel.
 fn pset(fb: &mut FBType, x: i32, y: i32, c: Color) {
     if x >= 0 && y >= 0 && x < COLS as i32 && y < ROWS as i32 {
-        let _ = Pixel(Point::new(x, y), c).draw(fb);
+        let _ = Pixel(Point::new(x, y), scaled(c)).draw(fb);
     }
 }
 
@@ -478,7 +527,7 @@ fn fmt_minutes(minutes: Option<u16>) -> String<8> {
 /// A full-width rule at row `y` in `color`.
 fn rule(fb: &mut FBType, y: i32, color: Color) {
     let _ = Line::new(Point::new(0, y), Point::new(COLS as i32 - 1, y))
-        .into_styled(PrimitiveStyle::with_stroke(color, 1))
+        .into_styled(PrimitiveStyle::with_stroke(scaled(color), 1))
         .draw(fb);
 }
 
@@ -487,7 +536,7 @@ fn rule(fb: &mut FBType, y: i32, color: Color) {
 fn draw_badge(fb: &mut FBType, line: &str, x: i32, y: i32, fill: Color, text: Color) -> i32 {
     let w = line.chars().count() as i32 * 6 + 5;
     let _ = Rectangle::new(Point::new(x, y), Size::new(w as u32, 11))
-        .into_styled(PrimitiveStyle::with_fill(fill))
+        .into_styled(PrimitiveStyle::with_fill(scaled(fill)))
         .draw(fb);
     left(fb, line, x + 3, y + 1, style(&FONT_6X10, text));
     x + w
