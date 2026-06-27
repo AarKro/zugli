@@ -328,14 +328,14 @@ fn draw_provisioning(fb: &mut FBType) {
     let big = style(&FONT_6X10, ACCENT);
     let dim = style(&FONT_5X7, DIM);
     let accent = style(&FONT_5X7, ACCENT);
-    // 1) Join the SoftAP, 2) open the portal address. iOS often doesn't auto-pop the
-    // captive portal, so we show the address to type in manually on the bottom row.
-    left(fb, "Zugli", 2, 1, big);
-    left(fb, "Join WiFi:", 2, 15, dim);
-    left(fb, "Zugli-Setup", 2, 24, accent);
-    left(fb, "then open:", 2, 40, dim);
-    // Bottom row — the SoftAP address (fixed at 192.168.4.1, PROJECT_BRIEF.md §5.2).
-    left(fb, "192.168.4.1", 2, 55, accent);
+    // Title, then two label/value sections: 1) join the SoftAP, 2) open the portal address.
+    // (iOS often doesn't auto-pop the captive portal, so the address is shown to type in.) Each
+    // label sits tight above its value; the sections are evenly spaced down the panel.
+    left(fb, "Zugli", 2, 4, big);
+    left(fb, "Join WiFi:", 2, 20, dim);
+    left(fb, "Zugli-Setup", 2, 28, accent);
+    left(fb, "then open:", 2, 42, dim);
+    left(fb, "192.168.4.1", 2, 50, accent);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -483,16 +483,14 @@ fn draw_connecting(fb: &mut FBType, frame: u32) -> bool {
 fn draw_idle(fb: &mut FBType, octets: [u8; 4]) {
     let accent = style(&FONT_5X7, ACCENT);
     let dim = style(&FONT_5X7, DIM);
-    left(fb, "Open", 2, 4, dim);
-    left(fb, "zugli", 2, 16, accent);
-    left(fb, ".local", 2, 26, accent);
-    left(fb, "or IP:", 2, 40, dim);
+    // Two evenly-spaced label/value sections: the mDNS name and the IP, each on its own line
+    // (both fit the 64-px width in this 5-px font, so neither needs to wrap).
+    left(fb, "Open:", 2, 12, dim);
+    left(fb, "zugli.local", 2, 20, accent);
+    left(fb, "or IP:", 2, 38, dim);
     let mut ip: String<16> = String::new();
-    let _ = write!(ip, "{}.{}", octets[0], octets[1]);
-    left(fb, ip.as_str(), 2, 50, accent);
-    let mut ip2: String<16> = String::new();
-    let _ = write!(ip2, "{}.{}", octets[2], octets[3]);
-    left(fb, ip2.as_str(), 2, 58, accent);
+    let _ = write!(ip, "{}.{}.{}.{}", octets[0], octets[1], octets[2], octets[3]);
+    left(fb, ip.as_str(), 2, 46, accent);
 }
 
 fn draw_offline(fb: &mut FBType) {
