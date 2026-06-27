@@ -154,6 +154,11 @@ async fn main(spawner: Spawner) -> ! {
             spawner.spawn(portal::dhcp_task(stack).unwrap());
             spawner.spawn(portal::dns_task(stack).unwrap());
             spawner.spawn(portal::setup_server_task(stack).unwrap());
+            // Serve `zugli.local` over mDNS on the SoftAP too, so the setup page is reachable
+            // by name (not just the bare IP). `.local` is resolved via mDNS rather than the
+            // catch-all DNS, so it needs this responder; it answers with 192.168.4.1 (read
+            // live from the AP stack). Same name works here and once the board is on WiFi.
+            spawner.spawn(mdns_task(stack).unwrap());
         }
         Some(creds) => {
             // ---------------- Phase 2 + 3: connected ----------------

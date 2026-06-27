@@ -307,10 +307,7 @@ pub fn draw_state(fb: &mut FBType, state: &DisplayState, frame: u32) -> bool {
     // Pick the brightness for this frame once; every colour is scaled to it via `scaled`.
     RENDER_BRIGHTNESS.store(current_brightness(), Ordering::Relaxed);
     match state {
-        DisplayState::Provisioning => {
-            draw_provisioning(fb);
-            false
-        }
+        DisplayState::Provisioning => draw_provisioning(fb, frame),
         DisplayState::Connecting => draw_connecting(fb, frame),
         DisplayState::IdleAddress { octets } => draw_idle(fb, *octets, frame),
         DisplayState::Departures { station, deps } => draw_departures(fb, station, deps, frame),
@@ -321,18 +318,21 @@ pub fn draw_state(fb: &mut FBType, state: &DisplayState, frame: u32) -> bool {
     }
 }
 
-fn draw_provisioning(fb: &mut FBType) {
+fn draw_provisioning(fb: &mut FBType, frame: u32) -> bool {
     let big = style(&FONT_6X10, ACCENT);
     let dim = style(&FONT_5X7, DIM);
     let accent = style(&FONT_5X7, ACCENT);
-    // Title, then two label/value sections: 1) join the SoftAP, 2) open the portal address.
-    // (iOS often doesn't auto-pop the captive portal, so the address is shown to type in.) Each
-    // label sits tight above its value; the sections are evenly spaced down the panel.
-    left(fb, "Zugli", 2, 4, big);
-    left(fb, "Join WiFi:", 2, 20, dim);
-    left(fb, "Zugli-Setup", 2, 28, accent);
+    // Title, then two label/value sections: 1) join the SoftAP, 2) open the portal. The portal
+    // is reachable by the mDNS name (served on the SoftAP too) with the bare IP as a fallback,
+    // shown on one scrolling line. (iOS often doesn't auto-pop the captive portal, so an address
+    // is shown to type in.) Each label sits tight above its value.
+    left(fb, "Zugli", 2, 2, big);
+    left(fb, "Join WiFi:", 2, 18, dim);
+    left(fb, "Zugli-Setup", 2, 26, accent);
     left(fb, "then open:", 2, 42, dim);
-    left(fb, "192.168.4.1", 2, 50, accent);
+    // Fixed SoftAP address, always wider than the panel, so it scrolls as a marquee. Returns
+    // whether it's scrolling so the render loop keeps ticking frames.
+    draw_marquee(fb, "zugli.local or 192.168.4.1", 2, 50, COLS as i32 - 2, accent, 5, frame)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -479,17 +479,24 @@ fn draw_connecting(fb: &mut FBType, frame: u32) -> bool {
 
 fn draw_idle(fb: &mut FBType, octets: [u8; 4], frame: u32) -> bool {
     let accent = style(&FONT_5X7, ACCENT);
+    let amber = style(&FONT_5X7, AMBER);
     let dim = style(&FONT_5X7, DIM);
-    // Two evenly-spaced label/value sections: the mDNS name (fixed length) and the IP.
-    left(fb, "Open:", 2, 12, dim);
-    left(fb, "zugli.local", 2, 20, accent);
-    left(fb, "or IP:", 2, 38, dim);
-    let mut ip: String<16> = String::new();
-    let _ = write!(ip, "{}.{}.{}.{}", octets[0], octets[1], octets[2], octets[3]);
-    // The IP varies by network and can be wider than the panel; scroll it as a marquee when it
-    // doesn't fit (a too-long line would otherwise just clip — it never crashes). Returns
-    // whether it's scrolling so the render loop keeps ticking frames.
-    draw_marquee(fb, ip.as_str(), 2, 46, COLS as i32 - 2, accent, 5, frame)
+    // The board is on WiFi but no connection is picked yet. Lead with the call to action (too
+    // wide for one line at this font, so split over two with a right arrow), then how to reach
+    // the config page: mDNS name first, IP as a fallback, on one line.
+    left(fb, "Choose a", 2, 2, amber);
+    left(fb, "connection", 2, 12, amber);
+    arrow(fb, 54, 13, ACCENT);
+    left(fb, "Open:", 2, 32, dim);
+    let mut addr: String<32> = String::new();
+    let _ = write!(
+        addr,
+        "zugli.local or {}.{}.{}.{}",
+        octets[0], octets[1], octets[2], octets[3]
+    );
+    // The combined line is always wider than the panel, so it scrolls as a marquee (clip-safe;
+    // never crashes). Returns whether it's scrolling so the render loop keeps ticking frames.
+    draw_marquee(fb, addr.as_str(), 2, 42, COLS as i32 - 2, accent, 5, frame)
 }
 
 fn draw_offline(fb: &mut FBType) {

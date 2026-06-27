@@ -1,5 +1,7 @@
-//! Minimal multicast-DNS responder so `zugli.local` resolves on the home network
-//! (PROJECT_BRIEF.md §3.3).
+//! Minimal multicast-DNS responder so `zugli.local` resolves both on the home network
+//! (Phase 2) and on the captive-portal SoftAP during setup (Phase 1) (PROJECT_BRIEF.md §3.3).
+//! The answer address is read live from the stack, so the same task serves the STA lease in
+//! Phase 2 and the fixed 192.168.4.1 SoftAP address in Phase 1.
 //!
 //! mDNS is a tiny corner of DNS: a host listens on UDP `224.0.0.251:5353` and, when it
 //! sees a query for its own name, multicasts an `A` answer. We only own a single name
