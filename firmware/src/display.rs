@@ -276,6 +276,12 @@ fn left(fb: &mut FBType, s: &str, x: i32, y: i32, st: MonoTextStyle<'static, Col
     let _ = Text::with_baseline(s, Point::new(x, y), st, Baseline::Top).draw(fb);
 }
 
+/// Draw `s` with its text baseline (the line digits sit on) at row `y`, so glyphs of different
+/// font sizes line up along the bottom. `x` is the left edge.
+fn baselined(fb: &mut FBType, s: &str, x: i32, y: i32, st: MonoTextStyle<'static, Color>) {
+    let _ = Text::with_baseline(s, Point::new(x, y), st, Baseline::Alphabetic).draw(fb);
+}
+
 /// Draw `s` horizontally centred at baseline-top `y`. `char_w` is the font's per-character
 /// advance (e.g. 5 for `FONT_5X7`, 6 for `FONT_6X10`).
 fn centered(fb: &mut FBType, s: &str, y: i32, st: MonoTextStyle<'static, Color>, char_w: i32) {
@@ -499,15 +505,16 @@ fn draw_departures(
         return false;
     }
 
-    // --- Top: the journey — which stop we're at, and where the saved line is headed. The full
-    // names (city included) are kept so the connection is unambiguous whatever was configured.
+    // --- Top: the journey — which stop we're at, and where the saved line is headed. Full
+    // names (city included) keep the connection unambiguous, unless the user enabled "hide city
+    // names" in the config page, in which case the leading "City, " prefix is dropped.
     let scroll_station =
-        draw_marquee(fb, station, 1, 0, COLS as i32 - 2, style(&FONT_6X10, AMBER), 6, frame);
+        draw_marquee(fb, city(station), 1, 0, COLS as i32 - 2, style(&FONT_6X10, AMBER), 6, frame);
     rule(fb, 11, ACCENT);
 
     // Destination preceded by a copper arrow. The arrow is drawn after the text so a long,
     // scrolling destination slides behind it rather than over it.
-    let dest = deps[0].destination.as_str();
+    let dest = city(deps[0].destination.as_str());
     let scroll_dest =
         draw_marquee(fb, dest, 10, 14, COLS as i32 - 11, style(&FONT_5X7, AMBER), 5, frame);
     arrow(fb, 1, 15, ACCENT);
@@ -520,15 +527,18 @@ fn draw_departures(
     let badge_w = line.chars().count() as i32 * 6 + 5;
     let _ = draw_badge(fb, line, (COLS as i32 - badge_w) / 2, 26, AMBER, OFF);
 
-    // Next departure — big copper figures on the left (its bottom row is 42 + 20 = 62).
-    left(fb, &fmt_minutes(deps[0].minutes), 4, 42, style(&FONT_10X20, ACCENT));
+    // Next & following departures share one text baseline, so the two font sizes align along
+    // the bottom: baseline at row 58 (= 63 − 5) leaves 5 unlit rows beneath the digits, and
+    // each number is inset 5 columns from its side.
+    const NUM_BASELINE: i32 = 58;
+    const SIDE: i32 = 5;
+    baselined(fb, &fmt_minutes(deps[0].minutes), SIDE, NUM_BASELINE, style(&FONT_10X20, ACCENT));
 
-    // The one after — smaller amber figures on the right, bottom-aligned with the big figure
-    // (y = 62 − 10) and nudged 2 px in from the edge so neither number hugs the side.
+    // The one after — smaller amber figures on the right, same baseline.
     if let Some(after) = deps.get(1) {
         let t = fmt_minutes(after.minutes);
-        let tx = COLS as i32 - t.chars().count() as i32 * 6 - 4;
-        left(fb, &t, tx, 52, style(&FONT_6X10, AMBER));
+        let tx = COLS as i32 - SIDE - t.chars().count() as i32 * 6;
+        baselined(fb, &t, tx, NUM_BASELINE, style(&FONT_6X10, AMBER));
     }
 
     scroll_station || scroll_dest
@@ -545,6 +555,19 @@ fn arrow(fb: &mut FBType, x: i32, y: i32, c: Color) {
     pset(fb, x + 6, y + 2, c);
     pset(fb, x + 5, y + 3, c);
     pset(fb, x + 4, y + 4, c);
+}
+
+/// Apply the user's "hide city names" setting: when enabled, drop a leading "City, " prefix so
+/// only the place name shows (e.g. "Zürich, Klusplatz" → "Klusplatz"); otherwise pass through.
+fn city(name: &str) -> &str {
+    if crate::shared::strip_city_enabled() {
+        match name.split_once(", ") {
+            Some((_, rest)) if !rest.is_empty() => rest,
+            _ => name,
+        }
+    } else {
+        name
+    }
 }
 
 /// Format minutes-to-departure as the panel shows it: `--` (no service), `now`, or `N'`.

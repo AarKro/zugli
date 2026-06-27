@@ -17,7 +17,7 @@ use esp_storage::FlashStorage;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Selection, WifiCreds};
+use crate::model::{Config, Selection, WifiCreds};
 
 const SECTOR: u32 = FlashStorage::SECTOR_SIZE; // 4096
 // Both records live in ONE sector at the start of the nvs partition. An earlier design put
@@ -28,11 +28,14 @@ const STORE_SECTOR: u32 = 0;
 const MAGIC: u32 = 0x5A47_4C32; // "ZGL2" — bumped; old single-record format is ignored
 const MAX_PAYLOAD: usize = 768;
 
-/// Everything persisted, as one record so both fields survive independent updates.
+/// Everything persisted, as one record so all fields survive independent updates. `config` is
+/// `#[serde(default)]` so records written before it existed still load (it just defaults).
 #[derive(Default, Serialize, Deserialize)]
 struct Persisted {
     wifi: Option<WifiCreds>,
     selection: Option<Selection>,
+    #[serde(default)]
+    config: Config,
 }
 
 /// Globally shared flash store, initialised once at boot via [`init`].
@@ -186,6 +189,16 @@ impl Store {
     pub fn save_selection(&mut self, sel: &Selection) -> Result<(), ()> {
         let mut all = self.read_all();
         all.selection = Some(sel.clone());
+        self.write_all(&all)
+    }
+
+    pub fn load_config(&mut self) -> Config {
+        self.read_all().config
+    }
+
+    pub fn save_config(&mut self, cfg: &Config) -> Result<(), ()> {
+        let mut all = self.read_all();
+        all.config = *cfg;
         self.write_all(&all)
     }
 }

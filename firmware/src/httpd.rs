@@ -14,8 +14,8 @@ use picoserve::routing::{get, post};
 use picoserve::io::Write;
 use picoserve::{Config, Router, Timeouts};
 
-use crate::model::Selection;
-use crate::shared::{SELECTION, SELECTION_CHANGED};
+use crate::model::{Config as BoardConfig, Selection};
+use crate::shared::{self, SELECTION, SELECTION_CHANGED};
 use crate::storage::STORE;
 
 /// The config page, embedded into the firmware so it is served even without internet
@@ -83,13 +83,44 @@ async fn save(Json(sel): Json<Selection>) -> impl IntoResponse {
     Response::ok(json("{\"ok\":true}"))
 }
 
+/// Current board settings, for the config page's settings sheet to pre-fill the toggles.
+async fn get_config() -> impl IntoResponse {
+    // Two static bodies keep this allocation-free (the only field is a bool today).
+    let body = if shared::strip_city_enabled() {
+        "{\"stripCity\":true}"
+    } else {
+        "{\"stripCity\":false}"
+    };
+    Response::ok(json(body))
+}
+
+/// Apply a settings change: persist it and update the live flag the panel reads. Affects the
+/// board immediately — a re-poll re-emits the departures screen, redrawn with the new setting.
+async fn set_config(Json(cfg): Json<BoardConfig>) -> impl IntoResponse {
+    info!("config: stripCity = {}", cfg.strip_city);
+    {
+        let mut guard = STORE.lock().await;
+        match guard.as_mut() {
+            Some(store) => match store.save_config(&cfg) {
+                Ok(()) => info!("config: persisted to flash"),
+                Err(()) => log::error!("config: FLASH SAVE FAILED (setting won't survive reboot)"),
+            },
+            None => log::error!("config: no flash store (setting won't survive reboot)"),
+        }
+    }
+    shared::set_strip_city(cfg.strip_city);
+    SELECTION_CHANGED.signal(()); // wake the poll task so the panel redraws now
+    Response::ok(json("{\"ok\":true}"))
+}
+
 /// Serve the config page + `/save` on port 80. Handles one connection at a time, so the
 /// task simply re-listens after each connection closes.
 #[embassy_executor::task]
 pub async fn config_server_task(stack: Stack<'static>) {
     let app = Router::new()
         .route("/", get(index))
-        .route("/save", post(save));
+        .route("/save", post(save))
+        .route("/config", get(get_config).post(set_config));
     let config = Config::new(Timeouts {
         start_read_request: Duration::from_secs(10),
         persistent_start_read_request: Duration::from_secs(5),

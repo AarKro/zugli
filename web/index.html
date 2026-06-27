@@ -84,9 +84,67 @@
   .spin{display:inline-block;width:15px;height:15px;border:2px solid rgba(14,12,10,.4);
     border-top-color:var(--surface);border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px;margin-right:8px;}
   @keyframes s{to{transform:rotate(360deg);}}
+
+  /* settings cogwheel + mobile bottom-sheet */
+  .gear{
+    position:fixed;top:calc(14px + env(safe-area-inset-top));right:14px;z-index:20;
+    width:44px;height:44px;display:flex;align-items:center;justify-content:center;
+    background:var(--surface);color:var(--accent);border:none;border-radius:12px;cursor:pointer;
+  }
+  .gear:active{background:#1a1510;}
+  .gear svg{display:block;width:24px;height:24px;fill:currentColor;}
+  .overlay{
+    position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.55);
+    display:flex;align-items:flex-end;justify-content:center;
+  }
+  .sheet{
+    width:100%;max-width:440px;background:var(--bg);
+    border-radius:18px 18px 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.5);
+    padding:20px 20px calc(24px + env(safe-area-inset-bottom));
+    animation:sheet-up .22s ease-out;
+  }
+  @keyframes sheet-up{from{transform:translateY(100%);}to{transform:translateY(0);}}
+  .sheet-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+  .sheet-head h2{margin:0;font-size:20px;color:var(--cream);}
+  .sheet-close{background:none;border:none;color:var(--muted);font-size:24px;line-height:1;cursor:pointer;padding:4px 6px;}
+  .opt{display:flex;align-items:center;gap:16px;padding:14px 0;}
+  .opt-text{display:flex;flex-direction:column;gap:3px;min-width:0;}
+  .opt-title{font-size:16px;color:var(--cream);}
+  .opt-sub{font-size:13px;}
+  .switch{position:relative;display:inline-block;width:48px;height:28px;flex:none;}
+  .switch input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer;}
+  .slider{position:absolute;inset:0;background:#3a322a;border-radius:999px;transition:.2s;pointer-events:none;}
+  .slider::before{content:"";position:absolute;height:22px;width:22px;left:3px;top:3px;
+    background:var(--cream);border-radius:50%;transition:.2s;}
+  .switch input:checked + .slider{background:var(--accent);}
+  .switch input:checked + .slider::before{transform:translateX(20px);}
 </style>
 </head>
 <body>
+<button id="gear" class="gear" aria-label="Settings" aria-haspopup="dialog">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94a7.49 7.49 0 0 0 .05-.94 7.49 7.49 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7 7 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7 7 0 0 0-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.78 8.8a.5.5 0 0 0 .12.64l2.03 1.58a7.49 7.49 0 0 0 0 1.88L2.9 14.48a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96a7 7 0 0 0 1.62.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54a7 7 0 0 0 1.62-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"/></svg>
+</button>
+
+<div id="settings" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+  <div class="sheet">
+    <div class="sheet-head">
+      <h2 id="settings-title">Settings</h2>
+      <button id="settings-close" class="sheet-close" aria-label="Close">&times;</button>
+    </div>
+    <label class="opt" for="opt-stripcity">
+      <span class="opt-text">
+        <span class="opt-title">Hide city names</span>
+        <span class="opt-sub muted">Show only the stop, e.g. “Schlieren” instead of “Zürich, Schlieren”.</span>
+      </span>
+      <span class="switch">
+        <input type="checkbox" id="opt-stripcity">
+        <span class="slider"></span>
+      </span>
+    </label>
+    <p class="note hidden" id="settings-status"></p>
+  </div>
+</div>
+
 <div class="wrap">
   <h1>Zügli</h1>
 
@@ -296,6 +354,46 @@ $("save").addEventListener("click", async () => {
     clearTimeout(timer);
     btn.disabled = false;
     btn.textContent = "Save to Zügli";
+  }
+});
+
+// ---------- settings sheet (board config: GET/POST /config) ----------
+const sheet = $("settings"), stripToggle = $("opt-stripcity"), setStatus = $("settings-status");
+let configLoaded = false;
+
+function openSettings(){
+  sheet.classList.remove("hidden");
+  setStatus.className = "note hidden";
+  if (configLoaded) return;
+  // Pre-fill from the board's current settings; leave defaults if it can't be reached.
+  fetch("/config")
+    .then(r => r.json())
+    .then(c => { stripToggle.checked = !!c.stripCity; configLoaded = true; })
+    .catch(() => {});
+}
+function closeSettings(){ sheet.classList.add("hidden"); }
+
+$("gear").addEventListener("click", openSettings);
+$("settings-close").addEventListener("click", closeSettings);
+// Tap the dim backdrop (outside the sheet) to dismiss.
+sheet.addEventListener("click", (e) => { if (e.target === sheet) closeSettings(); });
+
+stripToggle.addEventListener("change", async () => {
+  const val = stripToggle.checked;
+  setStatus.className = "note hidden";
+  try {
+    const r = await fetch("/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stripCity: val }),
+    });
+    if (!r.ok) throw new Error("bad status");
+    setStatus.textContent = "Saved — Zügli is updating.";
+    setStatus.className = "note ok";
+  } catch (_) {
+    stripToggle.checked = !val; // revert the toggle so it reflects the board's real state
+    setStatus.textContent = "Couldn't reach Zügli — try again.";
+    setStatus.className = "note err";
   }
 });
 </script>

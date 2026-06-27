@@ -29,6 +29,16 @@ pub struct WifiCreds {
     pub password: String<64>,
 }
 
+/// User-tweakable board settings, edited from the config page's settings sheet and persisted
+/// to flash. Defaults are chosen so a fresh board behaves exactly as before any config exists.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct Config {
+    /// When `true`, drop the leading "City, " prefix from stop/destination names on the panel
+    /// (e.g. "Zürich, Schlieren" → "Schlieren").
+    #[serde(rename = "stripCity", default)]
+    pub strip_city: bool,
+}
+
 /// One upcoming departure of the saved connection, ready to render (brief §7.7).
 #[derive(Clone, Debug)]
 pub struct Departure {

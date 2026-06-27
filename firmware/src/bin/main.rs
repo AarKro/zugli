@@ -119,6 +119,12 @@ async fn main(spawner: Spawner) -> ! {
         let mut g = STORE.lock().await;
         g.as_mut().and_then(|s| s.load_selection())
     };
+    // Apply persisted board settings (e.g. "hide city names") before anything renders.
+    let config = {
+        let mut g = STORE.lock().await;
+        g.as_mut().map(|s| s.load_config()).unwrap_or_default()
+    };
+    shared::set_strip_city(config.strip_city);
     info!(
         "boot: loaded from flash — wifi creds {}, selection {}",
         if creds.is_some() { "present" } else { "absent" },

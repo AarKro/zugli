@@ -1,7 +1,7 @@
 //! Cross-task shared state: the display channel, the live selection, the wall clock,
 //! and the device IP. All are process-global statics guarded for concurrent access.
 
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use portable_atomic::AtomicI64;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -25,6 +25,20 @@ static BOOT_UNIX: AtomicI64 = AtomicI64::new(0);
 
 /// Device IPv4 once DHCP has assigned one (packed big-endian), `0` = none yet.
 static DEVICE_IP: AtomicU32 = AtomicU32::new(0);
+
+/// Live mirror of [`Config::strip_city`](crate::model::Config), read by the render task each
+/// frame. Set at boot from flash and whenever the config page toggles it.
+static STRIP_CITY: AtomicBool = AtomicBool::new(false);
+
+/// Update the "hide city names" setting (from boot load or a config change).
+pub fn set_strip_city(on: bool) {
+    STRIP_CITY.store(on, Ordering::Relaxed);
+}
+
+/// Whether the panel should drop the "City, " prefix from stop/destination names.
+pub fn strip_city_enabled() -> bool {
+    STRIP_CITY.load(Ordering::Relaxed)
+}
 
 /// Record the wall clock from an SNTP sample.
 pub fn set_clock(now_unix: i64) {
