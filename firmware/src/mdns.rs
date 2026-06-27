@@ -48,6 +48,10 @@ pub async fn mdns_task(stack: Stack<'static>) {
         warn!("mdns: bind failed");
         return;
     }
+    // RFC 6762 §11 requires mDNS packets to be sent with IP TTL = 255, and resolvers (notably
+    // Apple's) silently DROP responses that arrive with any other TTL as a link-local check.
+    // smoltcp defaults to 64, so without this every `zugli.local` answer is ignored.
+    sock.set_hop_limit(Some(255));
 
     let dest = IpEndpoint::new(MDNS_GROUP, MDNS_PORT);
     let mut resp = [0u8; 64];
