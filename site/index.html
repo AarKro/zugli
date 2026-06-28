@@ -94,7 +94,7 @@
   @media(max-width:900px){.hero-grid{grid-template-columns:1fr;gap:48px;text-align:center;}
     .hero .lead{margin-left:auto;margin-right:auto;}
     .hero-cta{justify-content:center;}
-    .panel-stage{justify-content:center;}}
+    .panel-stage>div{align-items:center;}}
   .hero h1 span{color:var(--accent);}
   /* rotating word (tram / bus / train) */
   .rotator{display:inline-block;overflow:hidden;height:1em;line-height:1;vertical-align:bottom;}
@@ -117,7 +117,9 @@
   .glow.g2{width:420px;height:420px;bottom:-220px;left:-160px;opacity:.32;}
 
   /* ---------- LED panel mock (the signature visual) ---------- */
-  .panel-stage{display:flex;justify-content:flex-end;align-items:center;}
+  .panel-stage{display:flex;align-items:center;}
+  /* fill the column and pin the panel (and its caption) to the right edge */
+  .panel-stage>div{display:flex;flex-direction:column;align-items:flex-end;width:100%;}
   .led-panel{
     position:relative;width:min(420px,100%);aspect-ratio:1/1;
     background:#070605;border-radius:18px;
@@ -137,7 +139,7 @@
     background-size:100% 3px;opacity:.32;border-radius:8px;
   }
   @keyframes pulse{0%,100%{opacity:.35;}50%{opacity:1;}}
-  .panel-caption{text-align:center;margin-top:18px;font-size:13px;color:var(--muted);}
+  .panel-caption{text-align:center;margin-top:18px;font-size:13px;color:var(--muted);width:min(420px,100%);}
 
   /* ---------- big statement ---------- */
   .statement{text-align:center;}
