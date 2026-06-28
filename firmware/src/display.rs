@@ -48,9 +48,8 @@ const PLANES: usize = 7;
 // from the user's settings: a manual 1–10 level (× 10 %), optionally auto-dimmed to
 // `REDUCED_BRIGHTNESS` during a configurable local-time window.
 const REDUCED_BRIGHTNESS: u32 = 10; // the dimmed level used inside the auto-dim window
-// Local time = UTC + this offset. Switzerland is UTC+1 (CET); set to 2 for summer time (CEST).
-// DST is not auto-handled, so in summer the window edges simply shift by an hour.
-const LOCAL_UTC_OFFSET_HOURS: i64 = 1;
+// Local time = UTC + the Swiss civil offset, computed per-instant with EU daylight-saving rules
+// (CET = UTC+1 in winter, CEST = UTC+2 in summer). See [`swiss_offset_seconds`].
 // How often a static screen is redrawn so its brightness still tracks the auto-dim window.
 const BRIGHTNESS_REFRESH_SECS: u64 = 60;
 
@@ -65,7 +64,7 @@ fn current_brightness() -> u32 {
     let Some(unix) = crate::shared::now_unix() else {
         return base;
     };
-    let local_min = ((unix + LOCAL_UTC_OFFSET_HOURS * 3600).rem_euclid(86_400) / 60) as u16;
+    let local_min = ((unix + swiss_offset_seconds(unix)).rem_euclid(86_400) / 60) as u16;
     if in_window(local_min, crate::shared::reduced_start_min(), crate::shared::reduced_end_min()) {
         REDUCED_BRIGHTNESS
     } else {
@@ -83,6 +82,52 @@ fn in_window(now: u16, start: u16, end: u16) -> bool {
     } else {
         now >= start || now < end
     }
+}
+
+/// Switzerland's UTC offset (seconds) at Unix time `unix`, honouring EU daylight saving: CEST
+/// (UTC+2) from 01:00 UTC on the last Sunday of March to 01:00 UTC on the last Sunday of October,
+/// and CET (UTC+1) the rest of the year. Keeps the auto-dim window on wall-clock time year-round
+/// (a fixed offset made summer dimming an hour late).
+fn swiss_offset_seconds(unix: i64) -> i64 {
+    let (year, _, _) = civil_from_days(unix.div_euclid(86_400));
+    let dst_start = last_sunday_0100_utc(year, 3); // CEST begins
+    let dst_end = last_sunday_0100_utc(year, 10); // CET resumes
+    if unix >= dst_start && unix < dst_end { 2 * 3600 } else { 3600 }
+}
+
+/// Unix seconds for 01:00 UTC on the last Sunday of `month` in `year` — the EU DST switch instant.
+/// Both DST months (March, October) have 31 days, so start from the 31st and step back to Sunday.
+fn last_sunday_0100_utc(year: i64, month: u32) -> i64 {
+    let last = days_from_civil(year, month, 31);
+    // 1970-01-01 (day 0) was a Thursday; with 0 = Sunday that is `(days + 4) mod 7`.
+    let weekday = (last + 4).rem_euclid(7);
+    (last - weekday) * 86_400 + 3600
+}
+
+/// Civil date `(year, month, day)` for a count of days since the Unix epoch (Howard Hinnant's
+/// algorithm). Only the year is needed here, but the full date keeps the routine self-contained.
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+    (y + if m <= 2 { 1 } else { 0 }, m, d)
+}
+
+/// Days since the Unix epoch for civil date `(year, month, day)` (inverse of [`civil_from_days`]).
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400; // [0, 399]
+    let m = m as i64;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d as i64 - 1; // [0, 365]
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
+    era * 146_097 + doe - 719_468
 }
 
 /// Brightness percent applied to the frame currently being drawn. Set once per frame at the top

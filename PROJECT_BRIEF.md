@@ -319,8 +319,10 @@ The page loads current values with `GET /config` and persists changes with `POST
 }
 ```
 
-The device stores these in flash (§7.8) alongside the selection and replies `200 OK`. Local
-time is UTC plus a fixed offset (CET/CEST is not switched automatically).
+The device stores these in flash (§7.8) alongside the selection and replies `200 OK`. The
+auto-dim window is evaluated in Swiss local time: UTC plus an offset that follows EU daylight
+saving automatically (CET = UTC+1 in winter, CEST = UTC+2 from the last Sunday of March to the
+last Sunday of October).
 
 ---
 
