@@ -1,9 +1,10 @@
 # Zügli
 
-A DIY, ESP32-driven transit departure board for Swiss public transport. You configure
-**one stop and one connection** from your phone, and the device shows a live countdown to
-the next departure of that connection on a 64×64 LED matrix panel. It sits in your home,
-so you can see from across the room exactly when to leave.
+A DIY, ESP32-driven transit departure board for Swiss public transport. You pick a stop
+from your phone — then either a handful of **specific connections** or **all connections**
+departing it — and the device shows a live board of the next departures, each counting down,
+on a 64×64 LED matrix panel. It sits in your home, so you can see from across the room
+exactly when to leave.
 
 **https://aarkro.github.io/zugli/**
 

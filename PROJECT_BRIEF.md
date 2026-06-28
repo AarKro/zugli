@@ -1,8 +1,9 @@
 # Zügli — Project Brief & Implementation Plan
 
 > A DIY, ESP32-driven transit departure board for Swiss public transport. A user
-> configures **one stop + one connection** from their phone; the device shows the
-> live countdown to the next departure of that connection on an LED matrix panel.
+> picks a stop from their phone — then either a handful of **specific connections** or
+> **all connections** departing it — and the device shows a live departures board (the
+> next few departures, each with a countdown) on an LED matrix panel.
 
 **Status:** implementation-ready brief for a coding agent.
 **Audience:** the agent (or developer) implementing the web UI and the device firmware.
@@ -35,11 +36,14 @@ The device is a headless ESP32-S3 driving a 64×64 HUB75 RGB LED matrix. On firs
 power-up it has no WiFi, so it opens its own hotspot and shows a captive portal where
 the user picks their home WiFi and enters the password. Once on the home network, the
 device serves a small configuration web page (the `index.html` whose states are in the
-attached mockups). On that page the user searches for a stop, picks one live connection
-(line + destination), and saves it. The selection is stored in the device's flash. From
-then on, the firmware polls the Swiss transport API every 30 seconds and renders the
-countdown to the next departure of that connection on the LED panel. Holding the BOOT
-button for 3+ seconds wipes the saved WiFi and connection and returns to the captive-portal setup.
+attached mockups). On that page the user searches for a stop and chooses what to track:
+either **specific connections** (one or more lines + destinations) or **all connections**
+at the stop. A settings sheet on the same page tunes the panel — hiding the city-name
+prefix on stop/destination names, and controlling brightness (a fixed level, optionally
+auto-dimming to a low level overnight). The selection and settings are stored in the
+device's flash. From then on, the firmware polls the Swiss transport API every 30 seconds
+and renders the stop's next departures as a board on the LED panel. Holding the BOOT
+button for 3+ seconds wipes the saved WiFi and selection and returns to the captive-portal setup.
 
 ---
 
@@ -68,8 +72,8 @@ There are **three runtime phases**. The agent must implement all three.
             ┌──────────────────────── PHASE 3: RUNTIME / DISPLAY ──────────────────────────┐
             │  Every 30 s the FIRMWARE itself calls:                                        │
             │     GET https://transport.opendata.ch/v1/stationboard?id=<stop>&limit=20      │
-            │  Filters to the saved line+destination, keeps the next 3 departures,          │
-            │  computes minutes-to-departure for each, renders on the 64×64 HUB75 panel.    │
+            │  Filters to the tracked connections (specific or all), keeps the next 3       │
+            │  departures, computes minutes for each, renders a board on the panel.         │
             │                                                                               │
             │  BOOT held 3 s (UC3) → wipe WiFi + connection → reboot → Phase 1               │
             └──────────────────────────────────────────────────────────────────────────────┘
@@ -85,8 +89,9 @@ plain `fetch()` from the served page works.
 
 **Config stays live:** Phases 2 and 3 are not sequential states the device leaves behind —
 once on the home network, the config page remains served at `zugli.local` for the entire
-time the device runs, so the user can re-pick their stop/line whenever they want without a
-reset. "Phase 3" just means a selection now also exists and is being displayed.
+time the device runs, so the user can re-pick their stop and connections — or change panel
+settings — whenever they want without a reset. "Phase 3" just means a selection now also
+exists and is being displayed.
 
 > **Mixed-content note:** the page is served over **HTTP** from the ESP, and it calls the
 > API over **HTTPS**. That direction is allowed by browsers (HTTPS subresource on an HTTP
@@ -150,7 +155,9 @@ external requests except the transport API calls. This is the page served in **P
 It is one HTML file that toggles between states with JS (no real page navigation).
 
 The four attached state mockups (`initial_state`, `location_search`,
-`connection_showcase`, `connection_selected`) are the source of truth for layout.
+`connection_showcase`, `connection_selected`) are the source of truth for the core layout
+and brand. On top of those the page carries a **tracking-mode switch** at the top (§4.2)
+and a **settings sheet** behind a gear icon (§4.6); both use the same tokens and type.
 
 ### 4.1 Brand tokens (extracted from the mockups — use these exact values)
 
@@ -184,10 +191,17 @@ for font CDNs). Weights & sizes:
 
 Layout is a single centered column, generous spacing, left-aligned content, dark page.
 
-### 4.2 The four states
+### 4.2 Tracking mode + the four states
+
+Directly under the H1 wordmark is a full-width **tracking-mode switch** — two segments,
+*Specific connections* (left) and *All connections* (right). It decides what the device
+tracks and slightly changes the flow below:
+
+- **Specific connections** (default): the user picks one or more lines at the stop.
+- **All connections**: the user only picks the stop; every departure is shown.
 
 **State 1 — Initial** (`initial_state`)
-- H1 "Zügli" (accent colour).
+- H1 "Zügli" (accent colour), with the tracking-mode switch beneath it.
 - H2 "Where should Zügli look?" (cream).
 - One text input, cream background, placeholder "Search a stop…" (muted).
 
@@ -197,9 +211,10 @@ Layout is a single centered column, generous spacing, left-aligned content, dark
 - Rows are stop names from the API, e.g. "Zürich, Letzibach", "Zürich, Letzistrasse",
   "Zug, Letzi". Tapping a row selects that stop and collapses the dropdown.
 
-**State 3 — Connection showcase** (`connection_showcase`)
+**State 3 — Connection list** (`connection_showcase`) — *specific-connections mode only*
 - The input now shows the chosen stop (e.g. "Zürich, Letzigrund").
-- A new H2 "Which connection?" appears.
+- A new H2 "Which connections?" appears, with a hint that more than one can be picked
+  (up to 6).
 - Below it, a list of connection rows on dark surface (`--surface`). Each row =
   **[line badge] → [destination]**. Examples from the mockup: `2 → Klausplatz`,
   `2 → Schlieren`, `S123 → Brugg`, `S123 → Rapperswil-Jona`.
@@ -210,17 +225,16 @@ Layout is a single centered column, generous spacing, left-aligned content, dark
     `IR`, `IC`, `ICE`, `EC`, …).
   - Rule of thumb: if it runs on rails between towns it's outlined; local tram/bus is filled.
 - The arrow `→` and destination text are cream/white.
+- The list is **multi-select**: tapping a row toggles it on/off (accent border +
+  `--selected` tint when on). In **all-connections** mode this whole list is skipped.
 
-**State 4 — Connection selected** (`connection_selected`)
-- The tapped row gets an **accent border** and a **`--selected` background tint**.
-- A preview section appears lower on the page:
-  - Small H2 "This is what Zügli will show".
-  - A **display-preview panel** on `--surface`, styled like the real LED board:
-    accent text on near-black, showing `‹line› ‹destination›` left-aligned and
-    `‹minutes›'` right-aligned. Mockup example: `2 Schlieren …………… 11'`.
-  - This preview should use the same minutes value the device will show, fetched live
-    from the stationboard for that connection (so the user sees a real countdown).
-- A full-width **"Save to Zügli"** button (filled accent, dark label) at the bottom.
+**State 4 — Ready to save** (`connection_selected`)
+- Selected rows keep their **accent border** and **`--selected` background tint**.
+- A full-width **"Save to Zügli"** button (filled accent, dark label) appears: in specific
+  mode once at least one connection is selected, in all-connections mode as soon as a stop
+  is chosen.
+- Because the panel renders a live board (§7.7), the page shows no separate countdown
+  preview — what lands on the panel is the result.
 
 ### 4.3 Missing state the agent must add: **Save in-progress / success**
 
@@ -243,17 +257,21 @@ final selection, nothing more:
 ```
 POST /save   (Content-Type: application/json)
 {
-  "stopId":      "8591273",            // the API location `id` of the chosen stop
-  "stopName":    "Zürich, Letzigrund", // for display/echo only
-  "line":        "2",                  // the line number/name (API `number`)
-  "category":    "T",                  // raw API category (drives badge + future styling)
-  "destination": "Schlieren"           // the API `to` field of the chosen departure
+  "stopId":         "8591273",            // the API location `id` of the chosen stop
+  "stopName":       "Zürich, Letzigrund", // for display/echo only
+  "allConnections": false,                // true → track every departure at the stop
+  "connections": [                        // the tracked lines (empty when allConnections)
+    { "line": "2", "category": "T", "destination": "Schlieren" }
+    // … up to 6
+  ]
 }
 ```
 
-The device stores these fields and replies `200 OK` (e.g. `{"ok":true}`). The combination
-**(stopId + line + destination)** is the unique key the firmware filters on at runtime
-(exact string match on `number` and `to`).
+Each connection carries `line` (API `number`), `category` (drives the badge), and
+`destination` (API `to`). The device stores the selection and replies `200 OK` (e.g.
+`{"ok":true}`). At runtime the firmware keeps a board entry if **`allConnections`** is set,
+or otherwise if its `(number, to)` matches one of the listed `(line, destination)` pairs
+(exact string match).
 
 **On save the device switches live — no reboot.** It persists the selection, then
 immediately (re)starts the poll → display cycle with the new connection. The user does not
@@ -266,6 +284,40 @@ need to power-cycle; the panel updates within one poll interval.
 - API calls: see §6 for exact endpoints, params, and response fields.
 - Graceful handling of: no results, API timeout, a stop with no current departures.
 - Keep it phone-first (narrow viewport), touch targets ≥ 44 px.
+
+### 4.6 Settings sheet (panel preferences)
+
+A **gear icon** in the top-right opens a bottom-sheet of board settings, separate from the
+stop/connection selection. These tune how the panel *renders*, not what it tracks. Each
+control applies immediately: the page POSTs the whole settings object and the panel redraws
+within a poll cycle (optimistic UI — it reverts the control and shows an inline error if the
+device can't be reached).
+
+- **Hide city names** (toggle) — drop the leading "City, " prefix from stop and destination
+  names on the panel, e.g. "Schlieren" instead of "Zürich, Schlieren". Off by default.
+- **Brightness** (slider, 1–10) — a fixed panel brightness, mapping linearly to 10–100 %.
+  (HUB75 has no brightness register, so this scales the RGB values the firmware writes; §7.7.)
+- **Auto-dim at night** (toggle) — when on, the panel drops to a low ~10 % during the window
+  below; when off, the fixed level applies all day. On by default.
+- **Dim from / to** (two time inputs) — the start/end of the reduced-brightness window in
+  local time. The window may wrap past midnight (e.g. 20:00 → 08:00). Shown only while
+  auto-dim is on.
+
+The page loads current values with `GET /config` and persists changes with `POST /config`
+(Content-Type: application/json):
+
+```
+{
+  "stripCity":      false,   // hide the "City, " prefix on the panel
+  "brightness":     6,       // fixed level 1–10 (× 10 % = panel brightness)
+  "autoBrightness": true,    // auto-dim during the window below
+  "reducedStart":   1200,    // window start, minutes since local midnight (20:00)
+  "reducedEnd":     480      // window end,   minutes since local midnight (08:00)
+}
+```
+
+The device stores these in flash (§7.8) alongside the selection and replies `200 OK`. Local
+time is UTC plus a fixed offset (CET/CEST is not switched automatically).
 
 ---
 
@@ -365,11 +417,12 @@ connections are derived from this board. Relevant fields per entry:
 then **de-duplicate by (number + to)** so each distinct connection appears once in the
 picker.
 
-**Selecting the next departures (Phase 3, firmware):** for the *saved* connection, do
-**not** de-duplicate — instead keep the **next 3 entries** matching the saved
-`(number == line, to == destination)`, sorted by `departureTimestamp` ascending. These
-three feed the display. (If fewer than 3 match within `limit=20`, raise the limit or show
-what's available.)
+**Selecting the next departures (Phase 3, firmware):** from the board, keep the **next 3
+entries** the device is tracking, sorted by `departureTimestamp` ascending — either *every*
+entry (all-connections mode) or only those matching one of the saved
+`(number == line, to == destination)` pairs (specific mode). Do **not** de-duplicate; the
+soonest three feed the display. (If fewer than 3 qualify within `limit=20`, show what's
+available.)
 
 **Computing minutes (phone preview and firmware, per departure):** use the **real-time
 time when available, else the scheduled time** — i.e. prefer `stop.prognosis.departure`
@@ -451,16 +504,18 @@ on the other (see §7.6):
 2. **`provisioning_task`** (Phase 1 only) — SoftAP + DNS catch-all + `picoserve` setup
    page; on valid creds, persist + reboot.
 3. **`config_server_task`** (Phase 2 **and stays running through Phase 3**) — `picoserve`
-   serving `index.html` + `POST /save`. **The config page remains reachable at
-   `zugli.local` the whole time the device is operating**, so the user can change the stop/
-   line at any point without a WiFi reset. On save, persist the selection and signal the
-   poll/render tasks to switch to the new connection **live (no reboot)**.
+   serving `index.html` + `POST /save` + `GET`/`POST /config`. **The config page remains
+   reachable at `zugli.local` the whole time the device is operating**, so the user can
+   change the stop/connections (or panel settings) at any point without a WiFi reset. On
+   save, persist the selection and signal the poll/render tasks to switch **live (no
+   reboot)**.
    - **`mdns_task`** runs alongside it (Phase 2/3, `src/mdns.rs`) so `zugli.local` resolves
      on the home network (§3.3).
 4. **`poll_task`** (Phase 3) — every **30 s**: `reqwless` GET the stationboard for the
-   saved `stopId`, filter to `(line, destination)`, keep the **next 3** by departure time,
-   compute minutes for each, push the result (up to 3 entries) into a shared state cell
-   (e.g. an `embassy_sync::signal::Signal` or `Mutex`).
+   saved `stopId`, filter to the tracked connections (all departures, or just the specific
+   picks), keep the **next 3** by departure time, compute minutes for each, push the result
+   (up to 3 entries) into a shared state cell (e.g. an `embassy_sync::signal::Signal` or
+   `Mutex`).
 5. **`render_task`** (Phase 3, **pinned to the second core**) — continuously refreshes the
    HUB75 framebuffer from shared state and drives the DMA; redraws text when the value
    changes.
@@ -513,59 +568,72 @@ network activity. Mitigations, in order:
 
 ### 7.7 Display content & layout (Phase 3)
 
-The panel is **64×64**. The data layer provides the **next 3 departures** of the saved
-connection (line + destination + minutes each, soonest first).
+The panel is **64×64**. The data layer provides the **next 3 departures** the device is
+tracking (line + destination + minutes each, soonest first), drawn as a small **departures
+board**:
 
-> **Layout is intentionally left open for now — implement a clear PLACEHOLDER, not the
-> final design.** The visual treatment for 64×64 hasn't been decided; the user wants to
-> see how three departures look on real hardware before committing. So:
->
-> - Build a **`render_departures(&[Departure])` placeholder** that stacks up to 3 rows
->   top-to-bottom, each `‹line› ‹destination›` left / `‹minutes›'` right, accent on black,
->   in a legible `embedded-graphics` mono font (`FONT_5X7`/`FONT_6X10`, or `u8g2-fonts`
->   for something nicer). 64 px tall comfortably fits 3 rows.
-> - Keep this rendering **isolated behind one function** so the layout can be reworked
->   later without touching polling/state/networking code.
-> - The config-page preview (State 4) still shows a single line as its example — that's
->   fine; the *device* layout is a separate, later decision.
+- **Top:** the watched stop's name in amber, with a copper rule beneath. If the name is
+  wider than the panel it scrolls as a marquee.
+- **Below:** up to **three rows**, one per departure, each **[line badge] · destination ·
+  minutes**: an amber line badge pinned at the left (digits left unlit so they read as clean
+  cut-outs), the destination next to it, and the minutes-to-departure right-aligned. A
+  destination too wide for its slot scrolls within it, clipped between the badge and the
+  time so it never overruns the minutes.
+
+Both tracking modes (§4.2) use this same board; only the poll-side filter differs. The
+rendering is kept **isolated behind one function** so the layout can be reworked without
+touching polling/state/networking code.
 
 Data shape the render function receives (from `poll_task`):
 
 ```
-Departure { line: "2", category: "T", destination: "Schlieren", minutes: 11 }
-// up to 3, sorted soonest-first
+Departure { line: "2", category: "T", destination: "Schlieren", minutes: Some(11) }
+// up to 3, sorted soonest-first; `minutes: None` renders as `--`
 ```
+
+**Hide city names:** when the *Hide city names* setting (§4.6) is on, the leading "City, "
+prefix is stripped from the stop name **and** every destination before drawing (e.g.
+"Zürich, Schlieren" → "Schlieren").
+
+**Brightness:** HUB75 has no brightness register, so the firmware dims by scaling the RGB
+values it writes (a binary-code-modulation palette). The active level is the user's fixed
+1–10 setting (× 10 %), except that when *Auto-dim at night* is on and the synced local time
+falls inside the reduced window, the panel drops to ~10 %. Every palette colour is scaled
+through one choke point, so the whole board dims uniformly.
 
 **Required runtime display states (edge cases the firmware must handle):**
 
-| Situation | Suggested placeholder display |
+| Situation | Display |
 |---|---|
-| Normal (≥1 departure) | up to 3 rows: `2 Schlieren 11'` / `2 Schlieren 23'` / `2 Schlieren 35'` |
-| Departing now | show `0'` or `now` for that row |
-| Fewer than 3 matches | show however many matched |
-| No matching departure on the board | one row: `2 Schlieren --` (or "no service") |
-| API unreachable / poll failed | keep last values briefly, then a subtle "offline" indicator; retry next cycle |
-| WiFi lost | reconnect attempts; small disconnected glyph; if creds invalid, fall to Phase 1 |
+| Normal (≥1 departure) | up to 3 rows: `2 Schlieren 11'` / `S12 Flughafen 4'` / `2 Schlieren 23'` |
+| Departing now | show `now` for that row |
+| Fewer than 3 matches | show however many qualified |
+| Nothing tracked is departing | the stop header with a "no service" note |
+| API unreachable / poll failed | a subtle "offline" indicator; retry next cycle |
+| WiFi lost | reconnect attempts; if creds invalid, fall to Phase 1 |
 | Booting / no selection yet | **show the device address on the panel**: `zugli.local` and the current IP (e.g. `192.168.1.42`), so the user knows where to configure it. This is the primary way the IP fallback is discovered. |
 
-Colour: render text in the accent copper (`#B87648`) on black to mirror the design. On an
-RGB panel set the accent as an explicit `Rgb888`/`Rgb565` value — do **not** rely on a
-generic "yellow" constant, since the brand colour is a specific copper tone.
+Colour: the board renders in the brand copper/amber palette on black to mirror the design.
+On an RGB panel set the colours as explicit `Rgb888`/`Rgb565` values — do **not** rely on a
+generic "yellow" constant, since the brand colours are specific copper/amber tones.
 
 ### 7.8 Persistence (NVS / flash)
 
-Store two records in flash so they survive reboots and can be written independently. Both
-are **cleared together by UC3** (the 3 s BOOT hold):
+Three things persist in flash so they survive reboots and can be written independently:
 
 - **WiFi credentials** — written in Phase 1.
-- **Connection selection** — the `/save` payload from §4.4; written in Phase 2.
+- **Connection selection** — the `/save` payload from §4.4 (stop + tracking mode +
+  connections); written in Phase 2.
+- **Panel settings** — the `/config` object from §4.6 (hide-city + brightness).
 
 Storage (`src/storage.rs`) is a **raw read-modify-write** of a single 4096-byte sector at
 the start of the `nvs` data partition (located via `esp-bootloader-esp-idf`'s partition
 table reader), through the `embedded-storage` NOR-flash traits on `esp-storage`'s
-`FlashStorage`. Both records live in **one** `Persisted { wifi, selection }` struct
-serialised with `serde-json-core` behind a magic + length header. The BOOT-button reset
-(UC3) rewrites the record empty, wiping both fields.
+`FlashStorage`. All three live in **one** `Persisted { wifi, selection, config }` struct
+serialised with `serde-json-core` behind a magic + length header; each field is updated by
+reading the record, replacing that field, and writing it back. The BOOT-button reset (UC3)
+rewrites the record to its empty default — clearing the WiFi credentials and the selection,
+and returning settings to their defaults.
 
 On boot: if WiFi creds exist → join home WiFi (STA). Once on the network, the
 `config_server_task` and mDNS responder come up and **stay up** (config page always
@@ -575,11 +643,11 @@ If no WiFi creds exist → Phase 1 captive portal.
 
 ### 7.9 BOOT-button factory reset (UC3)
 
-`button_task` reads GPIO0. On a continuous **3 s hold**: wipe **both** stored records — the
-WiFi credentials **and** the saved connection — then **reboot**. The device comes back up
-with nothing saved → Phase 1 captive portal; once re-joined to a network it has no
-connection selected, so it shows the idle/address screen (§7.7) until the user picks a stop
-and line again. (GPIO0 is the BOOT strapping pin; it's a normal input after boot, so this
+`button_task` reads GPIO0. On a continuous **3 s hold**: wipe the stored record — the WiFi
+credentials **and** the saved selection (settings return to their defaults) — then
+**reboot**. The device comes back up with nothing saved → Phase 1 captive portal; once
+re-joined to a network it has no selection, so it shows the idle/address screen (§7.7) until
+the user picks a stop and connections again. (GPIO0 is the BOOT strapping pin; it's a normal input after boot, so this
 is purely a software behaviour.)
 
 ---
@@ -590,8 +658,12 @@ Everything below is decided — build to these, no further confirmation needed.
 
 - ✅ **Name → Zügli.** (§0)
 - ✅ **Captive-portal page → designed and delivered** as `designs/zugli_setup_page.html`. (§5.3)
-- ✅ **Display content → next 3 departures** of the saved connection; the on-panel *visual
-  layout* stays a placeholder for now, to be refined on real hardware. (§7.7)
+- ✅ **Display content → a departures board of the next 3 departures** the device tracks,
+  drawn as a stop header plus up to three [badge · destination · minutes] rows. (§7.7)
+- ✅ **Tracking modes → specific connections (multi-select) or all connections.** The panel
+  renders the same board either way; only the poll filter differs. (§4.2)
+- ✅ **Panel settings → hide city names + brightness (fixed level, optional night auto-dim).**
+  Edited in the config page's settings sheet, persisted to flash. (§4.6, §7.7)
 - ✅ **(1) Panel build → single native 64×64 HUB75E panel.** Configure `esp-hub75` for one
   1/32-scan 64×64 panel (address lines A–E, E required). No virtual-panel remapping. (§3.1–3.2)
 - ✅ **(2) Setup hotspot → open network** (no password). `Zügli-Setup` is open; users tap to
@@ -606,8 +678,8 @@ Everything below is decided — build to these, no further confirmation needed.
 - ✅ **(4) TLS → `embedded-tls` with `TlsVerify::None`** (no certificate verification) for the
   outbound API poll. Document the trade-off in the README. Hardening to `esp-mbedtls` is a
   possible future step, not required now. (§7.5)
-- ✅ **(5) BOOT reset → wipes everything** (WiFi credentials *and* the saved connection), so the
-  device comes back fully unconfigured: captive portal first, then a fresh stop/line pick. (§7.9)
+- ✅ **(5) BOOT reset → wipes everything** (WiFi credentials *and* the saved selection), so the
+  device comes back fully unconfigured: captive portal first, then a fresh stop/connections pick. (§7.9)
 - ✅ **(6) Departure times → real-time when available, else scheduled.** Use
   `stop.prognosis.departure` (live/delayed) when present; otherwise `stop.departureTimestamp`.
   Apply this in both the phone preview and the firmware. (§6.2)
@@ -756,8 +828,8 @@ All design assets live in the **`designs/`** folder of the repo. This brief live
 |---|---|---|
 | `designs/initial_state.svg` | 2 | Config page, empty search |
 | `designs/location_search.svg` | 2 | Stop autocomplete dropdown |
-| `designs/connection_showcase.svg` | 2 | Connection list with badges |
-| `designs/connection_selected.svg` | 2 | Selected row + live display preview + Save button |
+| `designs/connection_showcase.svg` | 2 | Connection list with badges (multi-select) |
+| `designs/connection_selected.svg` | 2 | Selected connections + Save button |
 | `designs/UC1__First-time_WiFi_setup.svg` | 1 | Captive-portal provisioning flow |
 | `designs/UC2__Configure_stop___line.svg` | 2 | Stop/line configuration flow |
 | `designs/UC3__Reset_saved_WiFi.svg` | 3 | BOOT-button WiFi reset flow |
