@@ -18,7 +18,8 @@ use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
 // Latin-1 (ISO-8859-1) font variants — same glyphs/metrics as the `ascii` ones, but with
 // the Western-European accented range (ä ö ü Ä Ö Ü ß …) needed for Swiss station names.
-use embedded_graphics::mono_font::iso_8859_1::{FONT_5X7, FONT_6X10, FONT_10X20};
+use embedded_graphics::mono_font::iso_8859_1::{FONT_5X7, FONT_6X10};
+use embedded_graphics::draw_target::DrawTargetExt;
 use embedded_graphics::mono_font::{MonoTextStyle, MonoTextStyleBuilder};
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Line, PrimitiveStyle, Rectangle};
@@ -288,12 +289,6 @@ fn left(fb: &mut FBType, s: &str, x: i32, y: i32, st: MonoTextStyle<'static, Col
     let _ = Text::with_baseline(s, Point::new(x, y), st, Baseline::Top).draw(fb);
 }
 
-/// Draw `s` with its text baseline (the line digits sit on) at row `y`, so glyphs of different
-/// font sizes line up along the bottom. `x` is the left edge.
-fn baselined(fb: &mut FBType, s: &str, x: i32, y: i32, st: MonoTextStyle<'static, Color>) {
-    let _ = Text::with_baseline(s, Point::new(x, y), st, Baseline::Alphabetic).draw(fb);
-}
-
 /// Draw `s` horizontally centred at baseline-top `y`. `char_w` is the font's per-character
 /// advance (e.g. 5 for `FONT_5X7`, 6 for `FONT_6X10`).
 fn centered(fb: &mut FBType, s: &str, y: i32, st: MonoTextStyle<'static, Color>, char_w: i32) {
@@ -504,60 +499,106 @@ fn draw_offline(fb: &mut FBType) {
     left(fb, "offline", 2, 28, dim);
 }
 
-/// Runtime departures screen, in two halves. The **top** is the journey: the full stop name
-/// (with its city), an arrow, then the destination — all in amber. The **bottom** is the
-/// timing: a centred amber line badge (tram/bus/train number, digits unlit for contrast), the
-/// next departure in big copper figures on the left, and the one after it smaller in amber on
-/// the right. Only the rules and the arrow are copper. Returns `true` while a heading is
-/// mid-scroll so the render loop keeps ticking frames.
+/// Runtime departures board: the watched stop on top, then up to three upcoming departures —
+/// soonest first — one per row. Each row pins the line badge on the left, scrolls the
+/// destination in the space up to the time, and right-aligns the minutes-to-departure. Used for
+/// both tracking modes (specific connections vs. the whole stop); only the poll-side filter
+/// differs. The "hide city names" setting applies to both the stop and each destination. Returns
+/// `true` while anything (the stop heading or a destination) is mid-scroll so the render loop
+/// keeps ticking.
 fn draw_departures(
     fb: &mut FBType,
     station: &str,
     deps: &[crate::model::Departure],
     frame: u32,
 ) -> bool {
-    if deps.is_empty() {
-        draw_offline(fb);
-        return false;
-    }
-
-    // --- Top: the journey — which stop we're at, and where the saved line is headed. Full
-    // names (city included) keep the connection unambiguous, unless the user enabled "hide city
-    // names" in the config page, in which case the leading "City, " prefix is dropped.
+    // Top: the stop we're watching, scrolling if its full name is too wide.
     let scroll_station =
         draw_marquee(fb, city(station), 1, 0, COLS as i32 - 2, style(&FONT_6X10, AMBER), 6, frame);
     rule(fb, 11, ACCENT);
 
-    // Destination preceded by a copper arrow. The arrow is drawn after the text so a long,
-    // scrolling destination slides behind it rather than over it.
-    let dest = city(deps[0].destination.as_str());
-    let scroll_dest =
-        draw_marquee(fb, dest, 10, 14, COLS as i32 - 11, style(&FONT_5X7, AMBER), 5, frame);
-    arrow(fb, 1, 15, ACCENT);
-    rule(fb, 23, ACCENT);
-
-    // --- Bottom: the line and its next two departures. ---
-    // Line badge (tram/bus/train number), centred: amber block with the digits left UNLIT so
-    // they read as clean cut-outs (lit digits on a lit block smear together on the panel).
-    let line = deps[0].line.as_str();
-    let badge_w = line.chars().count() as i32 * 6 + 5;
-    let _ = draw_badge(fb, line, (COLS as i32 - badge_w) / 2, 26, AMBER, OFF);
-
-    // Next & following departures share one text baseline, so the two font sizes align along
-    // the bottom: baseline at row 58 (= 63 − 5) leaves 5 unlit rows beneath the digits, and
-    // each number is inset 5 columns from its side.
-    const NUM_BASELINE: i32 = 58;
-    const SIDE: i32 = 5;
-    baselined(fb, &fmt_minutes(deps[0].minutes), SIDE, NUM_BASELINE, style(&FONT_10X20, ACCENT));
-
-    // The one after — smaller amber figures on the right, same baseline.
-    if let Some(after) = deps.get(1) {
-        let t = fmt_minutes(after.minutes);
-        let tx = COLS as i32 - SIDE - t.chars().count() as i32 * 6;
-        baselined(fb, &t, tx, NUM_BASELINE, style(&FONT_6X10, AMBER));
+    if deps.is_empty() {
+        // Online, but nothing tracked is departing right now (poll yields empty `deps`).
+        centered(fb, "no service", 32, style(&FONT_5X7, DIM), 5);
+        return scroll_station;
     }
 
-    scroll_station || scroll_dest
+    // Up to three departures fill the 52 px below the rule, one per row.
+    const ROW_H: i32 = 17;
+    const TOP: i32 = 12;
+    let mut scrolling = scroll_station;
+    for (i, dep) in deps.iter().take(3).enumerate() {
+        let ry = TOP + i as i32 * ROW_H;
+        let badge_y = ry + 3; // 11 px badge, vertically centred in the row
+        let text_y = ry + 5; // FONT_5X7 baseline-top, centred against the badge
+
+        // Right: minutes (`--`/`now`/`N'`), right-aligned to the panel edge. Amber — it's the
+        // key figure and reads brighter than copper at this small size.
+        let mins = fmt_minutes(dep.minutes);
+        let mins_w = mins.chars().count() as i32 * 5;
+        let mins_x = COLS as i32 - 1 - mins_w;
+        left(fb, &mins, mins_x, text_y, style(&FONT_5X7, AMBER));
+
+        // Left: the line badge (amber block with the digits left unlit, so they read as clean
+        // cut-outs rather than smearing into the lit block on the panel).
+        let badge_end = draw_badge(fb, dep.line.as_str(), 1, badge_y, AMBER, OFF);
+
+        // Middle: destination, clipped to the gap between the badge and the time so a long name
+        // scrolls behind the minutes rather than over them.
+        let dest_x = badge_end + 2;
+        let dest_avail = mins_x - 2 - dest_x;
+        if dest_avail > 0 {
+            scrolling |= draw_marquee_clipped(
+                fb,
+                city(dep.destination.as_str()),
+                dest_x,
+                text_y,
+                dest_avail,
+                ry,
+                ROW_H,
+                style(&FONT_5X7, AMBER),
+                5,
+                frame,
+            );
+        }
+    }
+    scrolling
+}
+
+/// Like [`draw_marquee`], but the text is clipped to the band `[x0, x0+avail) × [clip_top,
+/// clip_top+clip_h)` so a scrolling label can't spill into neighbouring content (the badge to
+/// its left or the time to its right). Returns `true` when it is scrolling.
+#[allow(clippy::too_many_arguments)] // a layout helper: position, clip band, style and frame all matter
+fn draw_marquee_clipped(
+    fb: &mut FBType,
+    text: &str,
+    x0: i32,
+    y: i32,
+    avail: i32,
+    clip_top: i32,
+    clip_h: i32,
+    st: MonoTextStyle<'static, Color>,
+    char_w: i32,
+    frame: u32,
+) -> bool {
+    let clip = Rectangle::new(
+        Point::new(x0, clip_top),
+        Size::new(avail.max(0) as u32, clip_h.max(0) as u32),
+    );
+    let mut target = fb.clipped(&clip);
+    let text_w = text.chars().count() as i32 * char_w;
+    if text_w <= avail {
+        let _ = Text::with_baseline(text, Point::new(x0, y), st, Baseline::Top).draw(&mut target);
+        return false;
+    }
+    const GAP: i32 = 14; // blank space between the end of the text and its wrapped copy
+    let period = text_w + GAP;
+    let phase = frame % (HOLD_FRAMES + period as u32);
+    let offset = phase.saturating_sub(HOLD_FRAMES) as i32; // 1 px/frame after the initial hold
+    let _ = Text::with_baseline(text, Point::new(x0 - offset, y), st, Baseline::Top).draw(&mut target);
+    let _ = Text::with_baseline(text, Point::new(x0 - offset + period, y), st, Baseline::Top)
+        .draw(&mut target);
+    true
 }
 
 /// A small right-pointing arrow (a 7×5 glyph) with its top-left at `(x, y)`.

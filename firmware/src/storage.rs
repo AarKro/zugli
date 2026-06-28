@@ -26,7 +26,10 @@ const SECTOR: u32 = FlashStorage::SECTOR_SIZE; // 4096
 // to round-trip (WiFi survived reboots), so we keep everything here and read-modify-write.
 const STORE_SECTOR: u32 = 0;
 const MAGIC: u32 = 0x5A47_4C32; // "ZGL2" — bumped; old single-record format is ignored
-const MAX_PAYLOAD: usize = 768;
+// Big enough for the largest record: a [`Selection`] tracking the full `MAX_CONNS` connections
+// (each up to line 16 + category 12 + destination 48 chars) plus the WiFi creds and config, all
+// JSON-encoded. Worst case is ~900 bytes; 1024 leaves headroom and still fits one 4096-B sector.
+const MAX_PAYLOAD: usize = 1024;
 
 /// Everything persisted, as one record so all fields survive independent updates. `config` is
 /// `#[serde(default)]` so records written before it existed still load (it just defaults).

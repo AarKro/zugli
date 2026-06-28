@@ -78,10 +78,10 @@ async fn index() -> impl IntoResponse {
 
 async fn save(Json(sel): Json<Selection>) -> impl IntoResponse {
     info!(
-        "save: {} / {} → {}",
+        "save: {} — mode {}, {} connection(s)",
         sel.stop_name.as_str(),
-        sel.line.as_str(),
-        sel.destination.as_str()
+        if sel.all_connections { "all" } else { "specific" },
+        sel.connections.len(),
     );
     // Persist to flash, update the live selection, and wake the poll task. Log the persist
     // result: if this fails the selection still works this session (set in memory below) but

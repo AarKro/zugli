@@ -4,8 +4,27 @@
 use heapless::{String, Vec};
 use serde::{Deserialize, Serialize};
 
-/// The connection the user picked, persisted to flash and matched against the
-/// stationboard at runtime. Mirrors the `POST /save` body (PROJECT_BRIEF.md §4.4).
+/// One tracked connection: a line and where it's headed. Matched against the stationboard's
+/// `(number, to)` at runtime, and carries the category for the panel badge.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Conn {
+    /// Line number/name (API `number`), e.g. `2`, `S12`.
+    pub line: String<16>,
+    /// Raw API `category` (kept for future badge styling).
+    pub category: String<12>,
+    /// Final destination (API `to`), e.g. `Schlieren`.
+    pub destination: String<48>,
+}
+
+/// Largest number of specific connections the user can track at one stop. Bounded so the whole
+/// [`Selection`] still fits the flash record (`storage::MAX_PAYLOAD`).
+pub const MAX_CONNS: usize = 6;
+
+/// The user's panel selection, persisted to flash and matched against the stationboard at
+/// runtime. Mirrors the `POST /save` body (PROJECT_BRIEF.md §4.4). The panel always renders the
+/// stop's next departures as a board; `all_connections` chooses which departures count:
+/// - `false` (default): only the connections the user explicitly picked ([`connections`]).
+/// - `true`: every connection departing the stop.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Selection {
     /// API location `id` of the chosen stop.
@@ -14,12 +33,14 @@ pub struct Selection {
     /// Human-readable stop name (display/echo only).
     #[serde(rename = "stopName")]
     pub stop_name: String<64>,
-    /// Line number/name (API `number`), e.g. `2`, `S12`.
-    pub line: String<16>,
-    /// Raw API `category` (drives the badge; kept for future styling).
-    pub category: String<12>,
-    /// Final destination (API `to`), e.g. `Schlieren`.
-    pub destination: String<48>,
+    /// When `true`, show every departure at the stop and ignore [`connections`]. Defaults via
+    /// `#[serde(default)]` so older flash records (and one-mode saves) still load.
+    #[serde(rename = "allConnections", default)]
+    pub all_connections: bool,
+    /// The specific connections to track (specific-connections mode); empty in all-connections
+    /// mode. `#[serde(default)]` keeps older flash records loading (they had no such field).
+    #[serde(default)]
+    pub connections: Vec<Conn, MAX_CONNS>,
 }
 
 /// Home WiFi credentials entered during provisioning (brief §5).
@@ -92,8 +113,9 @@ pub enum DisplayState {
     /// Joined WiFi but no connection selected yet: show the address so the user can
     /// reach the config page (brief §3.3 / §7.7). `octets` is the device IPv4.
     IdleAddress { octets: [u8; 4] },
-    /// Normal runtime: the saved stop's name plus its next departures (the `deps` vec may
-    /// hold a single `--` entry when there's no upcoming service).
+    /// Normal runtime: the saved stop's name plus its next departures, rendered as a board —
+    /// one row per departure (badge, destination, time-to-departure), soonest first. `deps` is
+    /// empty when nothing matching is currently departing (the panel shows "no service").
     Departures {
         station: String<64>,
         deps: Departures,

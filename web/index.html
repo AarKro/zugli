@@ -35,6 +35,20 @@
   .wrap{max-width:440px;margin:0 auto;}
   h1{color:var(--accent);font-weight:700;font-size:30px;margin:0 0 28px;letter-spacing:.5px;}
   h2{color:var(--cream);font-weight:500;font-size:19px;margin:28px 0 12px;}
+  /* Full-width tracking-mode switch, directly under the title. Two equal segments; the active
+     one is highlighted like a selected connection. */
+  .mode{display:flex;gap:6px;background:var(--surface);border-radius:14px;padding:6px;margin:0 0 4px;}
+  .mode-opt{
+    flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;
+    background:transparent;color:var(--muted);border:none;border-radius:10px;
+    padding:11px 8px;font-family:inherit;cursor:pointer;min-height:44px;
+    text-align:center;line-height:1.15;
+  }
+  .mode-opt .mt{font-size:15px;font-weight:600;}
+  .mode-opt .ms{font-size:11px;}
+  .mode-opt.active{background:var(--selected);}
+  .mode-opt.active .mt{color:var(--accent);}
+  .mode-opt.active .ms{color:var(--cream);}
   .field{
     width:100%;background:var(--cream);color:#1a1410;border:none;border-radius:12px;
     padding:14px 16px;font-size:16px;font-family:inherit;outline:none;
@@ -64,15 +78,6 @@
   .badge.outline{background:transparent;border:1.5px solid var(--accent);color:var(--accent);}
   .conn .dest{color:var(--cream);font-size:16px;}
   .conn .arrow{color:var(--muted);}
-  .preview{
-    background:var(--surface);border-radius:12px;padding:16px 18px;
-    font-variant-numeric:tabular-nums;
-  }
-  .preview .line{
-    display:flex;justify-content:space-between;align-items:baseline;gap:10px;
-    color:var(--accent);font-weight:600;font-size:20px;letter-spacing:.5px;
-  }
-  .preview .dots{flex:1;border-bottom:2px dotted #3a322a;margin:0 4px 6px;}
   .btn{
     width:100%;background:var(--accent);color:var(--surface);border:none;border-radius:12px;
     padding:16px;font-size:19px;font-weight:600;font-family:inherit;margin-top:24px;cursor:pointer;
@@ -191,6 +196,18 @@
 <div class="wrap">
   <h1>Zügli</h1>
 
+  <!-- Tracking mode: pick specific connections, or show the whole stop. Spans the full width. -->
+  <div class="mode" role="tablist" aria-label="What Zügli tracks">
+    <button class="mode-opt active" id="mode-specific" role="tab" aria-selected="true">
+      <span class="mt">Specific connections</span>
+      <span class="ms">Pick the lines to track</span>
+    </button>
+    <button class="mode-opt" id="mode-all" role="tab" aria-selected="false">
+      <span class="mt">All connections</span>
+      <span class="ms">Everything at the stop</span>
+    </button>
+  </div>
+
   <!-- State 1/2: stop search + autocomplete -->
   <h2>Where should Zügli look?</h2>
   <div class="search-wrap">
@@ -198,19 +215,17 @@
     <div class="dropdown hidden" id="results"></div>
   </div>
 
-  <!-- State 3/4: connection list -->
+  <!-- Connection list — multi-select in specific-connections mode, hidden for all-connections. -->
   <div id="conn-section" class="hidden">
-    <h2>Which connection?</h2>
+    <h2>Which connections?</h2>
+    <p class="note muted" id="conn-hint">Tap the lines you want — up to 6.</p>
     <div id="conns"></div>
     <p class="note muted hidden" id="conn-empty">No live connections at this stop right now.</p>
   </div>
 
-  <!-- State 4: live preview of what the panel will show -->
-  <div id="preview-section" class="hidden">
-    <h2>This is what Zügli will show</h2>
-    <div class="preview">
-      <div class="line"><span id="pv-left">—</span><span class="dots"></span><span id="pv-right">—</span></div>
-    </div>
+  <!-- Save: shown once there's something to save (≥1 picked connection, or a stop in
+       all-connections mode). The panel renders the live board, so there's no preview. -->
+  <div id="save-section" class="hidden">
     <button class="btn" id="save">Save to Zügli</button>
     <p class="note hidden" id="status"></p>
   </div>
@@ -221,8 +236,47 @@
 const API = "https://transport.opendata.ch/v1";
 const $ = (id) => document.getElementById(id);
 
+const MAX_CONNS = 6;         // mirrors firmware `model::MAX_CONNS`
 let selectedStop = null;     // {id, name}
-let selectedConn = null;     // {line, category, destination, minutes}
+let selectedConns = [];      // [{line, category, destination}] — the picked connections
+let allConnections = false;  // tracking mode: false = specific connections, true = whole stop
+
+// ---------- tracking-mode switch (specific connections vs. all connections) ----------
+function setMode(all){
+  if (all === allConnections) return;
+  allConnections = all;
+  $("mode-specific").classList.toggle("active", !all);
+  $("mode-all").classList.toggle("active", all);
+  $("mode-specific").setAttribute("aria-selected", String(!all));
+  $("mode-all").setAttribute("aria-selected", String(all));
+  if (all){
+    // Whole stop: no per-line choice — jump straight to the save button once a stop is picked.
+    $("conn-section").classList.add("hidden");
+    selectedConns = [];
+    if (selectedStop) showSave(); else $("save-section").classList.add("hidden");
+  } else {
+    // Specific connections: re-open the multi-select list for the chosen stop.
+    $("save-section").classList.add("hidden");
+    if (selectedStop) loadConnections(selectedStop.id);
+  }
+}
+// Reveal the save button ready for a fresh save (no lock-in behind a previous "Saved ✓").
+function showSave(){
+  $("save-section").classList.remove("hidden");
+  $("status").classList.add("hidden");
+  const btn = $("save");
+  btn.disabled = false;
+  btn.textContent = "Save to Zügli";
+}
+// In specific mode the save button only appears once at least one connection is picked. A no-op
+// in all-connections mode, so a late-resolving connection fetch can't hide its save button.
+function updateSpecificSave(){
+  if (allConnections) return;
+  if (selectedConns.length) showSave();
+  else $("save-section").classList.add("hidden");
+}
+$("mode-specific").addEventListener("click", () => setMode(false));
+$("mode-all").addEventListener("click", () => setMode(true));
 
 // ---------- stop autocomplete (phone → API directly, brief §6.1) ----------
 let debounce;
@@ -262,7 +316,9 @@ function chooseStop(s){
   selectedStop = { id: String(s.id), name: s.name };
   $("stop").value = s.name;
   hideResults();
-  loadConnections(s.id);
+  // All-connections mode skips the per-line list and offers the save button directly.
+  if (allConnections) showSave();
+  else loadConnections(s.id);
 }
 
 // ---------- connection list (brief §6.2: stationboard, dedupe by number+to) ----------
@@ -297,10 +353,17 @@ function isRail(cat){
   return !(c === "T" || c === "B" || c === "NFT" || c === "NFB" || c === "TROLLEY");
 }
 
+// Stable key for a connection (line + destination), used to track which rows are picked.
+function connKey(c){ return c.line + "→" + c.destination; }
+
 function renderConnections(conns){
+  if (allConnections) return; // mode switched while this stop's board was loading — ignore it
   const box = $("conns");
   box.innerHTML = "";
+  selectedConns = [];
+  updateSpecificSave();
   if (!conns.length){ $("conn-empty").classList.remove("hidden"); return; }
+  $("conn-empty").classList.add("hidden");
   conns.forEach(c => {
     const row = document.createElement("div");
     row.className = "conn";
@@ -310,59 +373,38 @@ function renderConnections(conns){
     const arrow = document.createElement("span"); arrow.className = "arrow"; arrow.textContent = "→";
     const dest = document.createElement("span"); dest.className = "dest"; dest.textContent = c.destination;
     row.append(badge, arrow, dest);
-    row.onclick = () => selectConnection(c, row);
+    row.onclick = () => toggleConnection(c, row);
     box.appendChild(row);
   });
 }
 
 function resetConnections(){
   $("conn-section").classList.add("hidden");
-  $("preview-section").classList.add("hidden");
-  selectedConn = null;
+  $("save-section").classList.add("hidden");
+  selectedConns = [];
 }
 
-// ---------- selected connection + live preview (brief §4.2 State 4) ----------
-async function selectConnection(c, row){
-  document.querySelectorAll(".conn.selected").forEach(el => el.classList.remove("selected"));
-  row.classList.add("selected");
-  selectedConn = { ...c };
-  $("preview-section").classList.remove("hidden");
-  $("pv-left").textContent = `${c.line} ${c.destination}`;
-  $("pv-right").textContent = "…";
+// ---------- multi-select connections (specific-connections mode) ----------
+// Tap toggles a connection on/off, up to MAX_CONNS. The save button appears once any are picked.
+function toggleConnection(c, row){
+  const key = connKey(c);
+  const i = selectedConns.findIndex(x => connKey(x) === key);
+  if (i >= 0){
+    selectedConns.splice(i, 1);
+    row.classList.remove("selected");
+  } else {
+    if (selectedConns.length >= MAX_CONNS) return; // at the cap — ignore further picks
+    selectedConns.push({ line: c.line, category: c.category, destination: c.destination });
+    row.classList.add("selected");
+  }
   $("status").classList.add("hidden");
-  // Always offer a fresh save — picking a new connection must never stay locked behind a
-  // previous "Saved ✓" state, so the user can override what's on Zügli at any time.
-  const saveBtn = $("save");
-  saveBtn.disabled = false;
-  saveBtn.textContent = "Save to Zügli";
-  const mins = await nextMinutes(selectedStop.id, c.line, c.destination);
-  selectedConn.minutes = mins;
-  $("pv-right").textContent = mins == null ? "--" : (mins === 0 ? "now" : `${mins}'`);
-}
-
-// minutes-to-departure: prefer real-time prognosis, else scheduled (brief §6.2 / §8-6)
-async function nextMinutes(stopId, line, dest){
-  try {
-    const r = await fetch(`${API}/stationboard?id=${encodeURIComponent(stopId)}&limit=20`);
-    const data = await r.json();
-    const now = Date.now() / 1000;
-    let best = null;
-    for (const e of (data.stationboard || [])){
-      const eLine = e.number ?? e.name ?? "";
-      if (eLine !== line || (e.to ?? "") !== dest) continue;
-      const prog = e.stop?.prognosis?.departure;
-      const t = prog ? Date.parse(prog) / 1000 : e.stop?.departureTimestamp;
-      if (!t) continue;
-      if (best == null || t < best) best = t;
-    }
-    if (best == null) return null;
-    return Math.max(0, Math.round((best - now) / 60));
-  } catch (_) { return null; }
+  updateSpecificSave();
 }
 
 // ---------- save (POST /save to the device, brief §4.3/§4.4) ----------
 $("save").addEventListener("click", async () => {
-  if (!selectedStop || !selectedConn) return;
+  if (!selectedStop) return;
+  if (!allConnections && !selectedConns.length) return;
   const btn = $("save"), st = $("status");
   btn.disabled = true;
   btn.innerHTML = `<span class="spin"></span>Saving…`;
@@ -370,9 +412,10 @@ $("save").addEventListener("click", async () => {
   const body = {
     stopId: selectedStop.id,
     stopName: selectedStop.name,
-    line: selectedConn.line,
-    category: selectedConn.category,
-    destination: selectedConn.destination,
+    allConnections,
+    connections: allConnections ? [] : selectedConns.map(c => ({
+      line: c.line, category: c.category, destination: c.destination,
+    })),
   };
   // Abort a stalled request so the button can never get stuck showing "Saving…".
   const ctrl = new AbortController();
