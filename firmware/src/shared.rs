@@ -30,6 +30,7 @@ static DEVICE_IP: AtomicU32 = AtomicU32::new(0);
 // flash and whenever the config page changes a setting. Plain atomics (no mutex) so the render
 // task never blocks; the reduced-brightness window is packed `start << 16 | end` into one u32.
 static STRIP_CITY: AtomicBool = AtomicBool::new(false);
+static SHOW_LINE_BADGES: AtomicBool = AtomicBool::new(true);
 static BRIGHTNESS_LEVEL: AtomicU32 = AtomicU32::new(6);
 static AUTO_BRIGHTNESS: AtomicBool = AtomicBool::new(true);
 static REDUCED_WINDOW: AtomicU32 = AtomicU32::new(((20 * 60) << 16) | (8 * 60));
@@ -37,6 +38,7 @@ static REDUCED_WINDOW: AtomicU32 = AtomicU32::new(((20 * 60) << 16) | (8 * 60));
 /// Push a whole [`Config`] into the live mirror (boot load or a config-page change).
 pub fn apply_config(cfg: &Config) {
     STRIP_CITY.store(cfg.strip_city, Ordering::Relaxed);
+    SHOW_LINE_BADGES.store(cfg.show_line_badges, Ordering::Relaxed);
     BRIGHTNESS_LEVEL.store(cfg.brightness.clamp(1, 10) as u32, Ordering::Relaxed);
     AUTO_BRIGHTNESS.store(cfg.auto_brightness, Ordering::Relaxed);
     REDUCED_WINDOW.store(
@@ -48,6 +50,11 @@ pub fn apply_config(cfg: &Config) {
 /// Whether the panel should drop the "City, " prefix from stop/destination names.
 pub fn strip_city_enabled() -> bool {
     STRIP_CITY.load(Ordering::Relaxed)
+}
+
+/// Whether departure rows show the line as a filled badge (vs. plain text).
+pub fn line_badges_enabled() -> bool {
+    SHOW_LINE_BADGES.load(Ordering::Relaxed)
 }
 
 /// Manual brightness level, 1–10 (× 10 % = panel brightness).

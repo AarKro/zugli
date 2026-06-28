@@ -503,9 +503,10 @@ fn draw_offline(fb: &mut FBType) {
 /// soonest first — one per row. Each row pins the line badge on the left, scrolls the
 /// destination in the space up to the time, and right-aligns the minutes-to-departure. Used for
 /// both tracking modes (specific connections vs. the whole stop); only the poll-side filter
-/// differs. The "hide city names" setting applies to both the stop and each destination. Returns
-/// `true` while anything (the stop heading or a destination) is mid-scroll so the render loop
-/// keeps ticking.
+/// differs. The "hide city names" setting applies to both the stop and each destination, and the
+/// "line badges" setting switches each line between a filled badge and plain text. A departure
+/// leaving now shows a front-of-tram pictogram in place of the minutes. Returns `true` while
+/// anything (the stop heading or a destination) is mid-scroll so the render loop keeps ticking.
 fn draw_departures(
     fb: &mut FBType,
     station: &str,
@@ -532,21 +533,33 @@ fn draw_departures(
         let badge_y = ry + 3; // 11 px badge, vertically centred in the row
         let text_y = ry + 5; // FONT_5X7 baseline-top, centred against the badge
 
-        // Right: minutes (`--`/`now`/`N'`), right-aligned to the panel edge. Amber — it's the
-        // key figure and reads brighter than copper at this small size.
+        // Right: time-to-departure, right-aligned to the panel edge, in copper. A departure
+        // leaving now (`Some(0)`) shows a front-of-tram pictogram (as SBB does) instead of text;
+        // otherwise the minutes (`--`/`N'`) are drawn as figures. `time_x` is the region's left
+        // edge, so the destination can be clipped to stop short of it either way.
+        let now = matches!(dep.minutes, Some(0));
         let mins = fmt_minutes(dep.minutes);
-        let mins_w = mins.chars().count() as i32 * 5;
-        let mins_x = COLS as i32 - 1 - mins_w;
-        left(fb, &mins, mins_x, text_y, style(&FONT_5X7, AMBER));
+        let time_w = if now { TRAIN_W } else { mins.chars().count() as i32 * 5 };
+        let time_x = COLS as i32 - 1 - time_w;
+        if now {
+            draw_train_front(fb, time_x, ry + 4, ACCENT);
+        } else {
+            left(fb, &mins, time_x, text_y, style(&FONT_5X7, ACCENT));
+        }
 
-        // Left: the line badge (amber block with the digits left unlit, so they read as clean
-        // cut-outs rather than smearing into the lit block on the panel).
-        let badge_end = draw_badge(fb, dep.line.as_str(), 1, badge_y, AMBER, OFF);
+        // Left: the line. With badges on (default), an amber block with the digits left unlit so
+        // they read as clean cut-outs; with badges off, plain amber text in the same slot.
+        let badge_end = if crate::shared::line_badges_enabled() {
+            draw_badge(fb, dep.line.as_str(), 1, badge_y, AMBER, OFF)
+        } else {
+            left(fb, dep.line.as_str(), 1, badge_y + 1, style(&FONT_6X10, AMBER));
+            1 + dep.line.chars().count() as i32 * 6
+        };
 
         // Middle: destination, clipped to the gap between the badge and the time so a long name
         // scrolls behind the minutes rather than over them.
         let dest_x = badge_end + 2;
-        let dest_avail = mins_x - 2 - dest_x;
+        let dest_avail = time_x - 2 - dest_x;
         if dest_avail > 0 {
             scrolling |= draw_marquee_clipped(
                 fb,
@@ -627,7 +640,9 @@ fn city(name: &str) -> &str {
     }
 }
 
-/// Format minutes-to-departure as the panel shows it: `--` (no service), `now`, or `N'`.
+/// Format minutes-to-departure as text: `--` (no service) or `N'`. The `Some(0)` "now" case is
+/// drawn by the caller as a [`draw_train_front`] pictogram, not text, so it never reaches here in
+/// practice; it still maps to `now` as a harmless fallback.
 fn fmt_minutes(minutes: Option<u16>) -> String<8> {
     let mut t: String<8> = String::new();
     match minutes {
@@ -649,6 +664,33 @@ fn rule(fb: &mut FBType, y: i32, color: Color) {
     let _ = Line::new(Point::new(0, y), Point::new(COLS as i32 - 1, y))
         .into_styled(PrimitiveStyle::with_stroke(scaled(color), 1))
         .draw(fb);
+}
+
+/// Width of the [`draw_train_front`] pictogram, in pixels.
+const TRAIN_W: i32 = 9;
+
+/// The "departing now" pictogram: a small front-of-tram glyph (rounded roof, two cab windows as
+/// dark cut-outs, two wheels), drawn 9×9 with its top-left at `(x, y)` in `c`. Stands in for the
+/// minutes when a departure is leaving now — the same idea as SBB's imminent-departure icon.
+fn draw_train_front(fb: &mut FBType, x: i32, y: i32, c: Color) {
+    const T: [[u8; 9]; 9] = [
+        [0, 0, 1, 1, 1, 1, 1, 0, 0],
+        [0, 1, 1, 1, 1, 1, 1, 1, 0],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 0, 0, 0, 1, 0, 0, 0, 1],
+        [1, 0, 0, 0, 1, 0, 0, 0, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [0, 1, 1, 0, 0, 0, 1, 1, 0],
+    ];
+    for (gy, row) in T.iter().enumerate() {
+        for (gx, &on) in row.iter().enumerate() {
+            if on == 1 {
+                pset(fb, x + gx as i32, y + gy as i32, c);
+            }
+        }
+    }
 }
 
 /// Draw a filled badge holding the line label, top-left at `(x, y)`: `fill` background with

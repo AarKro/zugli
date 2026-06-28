@@ -295,6 +295,8 @@ device can't be reached).
 
 - **Hide city names** (toggle) — drop the leading "City, " prefix from stop and destination
   names on the panel, e.g. "Schlieren" instead of "Zürich, Schlieren". Off by default.
+- **Line badges** (toggle) — show each departure's line in a filled badge; when off, the line
+  is rendered as plain text instead. On by default.
 - **Brightness** (slider, 1–10) — a fixed panel brightness, mapping linearly to 10–100 %.
   (HUB75 has no brightness register, so this scales the RGB values the firmware writes; §7.7.)
 - **Auto-dim at night** (toggle) — when on, the panel drops to a low ~10 % during the window
@@ -309,6 +311,7 @@ The page loads current values with `GET /config` and persists changes with `POST
 ```
 {
   "stripCity":      false,   // hide the "City, " prefix on the panel
+  "showLineBadges": true,    // render lines as filled badges (vs. plain text)
   "brightness":     6,       // fixed level 1–10 (× 10 % = panel brightness)
   "autoBrightness": true,    // auto-dim during the window below
   "reducedStart":   1200,    // window start, minutes since local midnight (20:00)
@@ -574,11 +577,13 @@ board**:
 
 - **Top:** the watched stop's name in amber, with a copper rule beneath. If the name is
   wider than the panel it scrolls as a marquee.
-- **Below:** up to **three rows**, one per departure, each **[line badge] · destination ·
-  minutes**: an amber line badge pinned at the left (digits left unlit so they read as clean
-  cut-outs), the destination next to it, and the minutes-to-departure right-aligned. A
-  destination too wide for its slot scrolls within it, clipped between the badge and the
-  time so it never overruns the minutes.
+- **Below:** up to **three rows**, one per departure, each **[line] · destination ·
+  minutes**: the line pinned at the left — an amber badge with the digits left unlit so they
+  read as clean cut-outs, or plain amber text when the *Line badges* setting (§4.6) is off —
+  the destination next to it, and the time-to-departure right-aligned in copper. A departure
+  leaving now shows a small **front-of-tram pictogram** in place of the minutes (as SBB does);
+  `None` renders as `--`. A destination too wide for its slot scrolls within it, clipped
+  between the line and the time so it never overruns.
 
 Both tracking modes (§4.2) use this same board; only the poll-side filter differs. The
 rendering is kept **isolated behind one function** so the layout can be reworked without
@@ -606,7 +611,7 @@ through one choke point, so the whole board dims uniformly.
 | Situation | Display |
 |---|---|
 | Normal (≥1 departure) | up to 3 rows: `2 Schlieren 11'` / `S12 Flughafen 4'` / `2 Schlieren 23'` |
-| Departing now | show `now` for that row |
+| Departing now | show a front-of-tram pictogram in the time column for that row |
 | Fewer than 3 matches | show however many qualified |
 | Nothing tracked is departing | the stop header with a "no service" note |
 | API unreachable / poll failed | a subtle "offline" indicator; retry next cycle |

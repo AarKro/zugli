@@ -60,6 +60,10 @@ pub struct Config {
     /// (e.g. "Zürich, Schlieren" → "Schlieren").
     #[serde(rename = "stripCity")]
     pub strip_city: bool,
+    /// When `true` (default), each departure row shows its line as a filled badge; when `false`,
+    /// the line is rendered as plain text, freeing the badge's padding for the destination.
+    #[serde(rename = "showLineBadges")]
+    pub show_line_badges: bool,
     /// Manual brightness level, 1–10, mapping linearly to 10–100 % panel brightness.
     #[serde(rename = "brightness")]
     pub brightness: u8,
@@ -79,6 +83,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             strip_city: false,
+            show_line_badges: true, // badges on by default
             brightness: 6,          // 60 %
             auto_brightness: true,  // preserve the board's existing night-dimming behaviour
             reduced_start: 20 * 60, // 20:00

@@ -161,6 +161,17 @@
       </span>
     </label>
 
+    <label class="opt" for="opt-badges">
+      <span class="opt-text">
+        <span class="opt-title">Line badges</span>
+        <span class="opt-sub muted">Show each line in a filled badge. Off shows the line as plain text.</span>
+      </span>
+      <span class="switch">
+        <input type="checkbox" id="opt-badges">
+        <span class="slider"></span>
+      </span>
+    </label>
+
     <div class="opt opt-col">
       <div class="opt-row">
         <span class="opt-title">Brightness</span>
@@ -445,17 +456,18 @@ $("save").addEventListener("click", async () => {
 
 // ---------- settings sheet (board config: GET/POST /config) ----------
 const sheet = $("settings"), setStatus = $("settings-status");
-const stripToggle = $("opt-stripcity"), brightRange = $("opt-brightness"), brightVal = $("bright-val"),
+const stripToggle = $("opt-stripcity"), badgesToggle = $("opt-badges"), brightRange = $("opt-brightness"), brightVal = $("bright-val"),
       autoToggle = $("opt-auto"), startTime = $("opt-start"), endTime = $("opt-end"), reducedWindow = $("reduced-window");
 let configLoaded = false;
 // The board's current settings; controls mirror this and every change posts the whole object.
-let cfg = { stripCity:false, brightness:6, autoBrightness:true, reducedStart:1200, reducedEnd:480 };
+let cfg = { stripCity:false, showLineBadges:true, brightness:6, autoBrightness:true, reducedStart:1200, reducedEnd:480 };
 
 const toMin = (hhmm) => { const [h,m] = hhmm.split(":").map(Number); return h*60 + m; };
 const toHHMM = (min) => `${String(Math.floor(min/60)).padStart(2,"0")}:${String(min%60).padStart(2,"0")}`;
 
 function renderConfig(){
   stripToggle.checked = !!cfg.stripCity;
+  badgesToggle.checked = !!cfg.showLineBadges;
   brightRange.value = cfg.brightness;
   brightVal.textContent = (cfg.brightness * 10) + "%";
   autoToggle.checked = !!cfg.autoBrightness;
@@ -504,6 +516,7 @@ async function applyChange(mutate){
 }
 
 stripToggle.addEventListener("change", () => applyChange(() => { cfg.stripCity = stripToggle.checked; }));
+badgesToggle.addEventListener("change", () => applyChange(() => { cfg.showLineBadges = badgesToggle.checked; }));
 autoToggle.addEventListener("change", () => applyChange(() => { cfg.autoBrightness = autoToggle.checked; }));
 // Live-update the % label while sliding; persist once the user lets go.
 brightRange.addEventListener("input", () => { brightVal.textContent = (brightRange.value * 10) + "%"; });

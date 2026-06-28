@@ -106,8 +106,9 @@ async fn get_config() -> impl IntoResponse {
     let mut body: String<160> = String::new();
     let _ = write!(
         body,
-        "{{\"stripCity\":{},\"brightness\":{},\"autoBrightness\":{},\"reducedStart\":{},\"reducedEnd\":{}}}",
+        "{{\"stripCity\":{},\"showLineBadges\":{},\"brightness\":{},\"autoBrightness\":{},\"reducedStart\":{},\"reducedEnd\":{}}}",
         shared::strip_city_enabled(),
+        shared::line_badges_enabled(),
         shared::brightness_level(),
         shared::auto_brightness_enabled(),
         shared::reduced_start_min(),
@@ -120,8 +121,8 @@ async fn get_config() -> impl IntoResponse {
 /// board immediately — a re-poll re-emits the departures screen, redrawn with the new settings.
 async fn set_config(Json(cfg): Json<BoardConfig>) -> impl IntoResponse {
     info!(
-        "config: stripCity={} brightness={} autoBrightness={} reduced={}..{}",
-        cfg.strip_city, cfg.brightness, cfg.auto_brightness, cfg.reduced_start, cfg.reduced_end
+        "config: stripCity={} showLineBadges={} brightness={} autoBrightness={} reduced={}..{}",
+        cfg.strip_city, cfg.show_line_badges, cfg.brightness, cfg.auto_brightness, cfg.reduced_start, cfg.reduced_end
     );
     {
         let mut guard = STORE.lock().await;
