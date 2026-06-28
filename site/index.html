@@ -91,10 +91,6 @@
   /* ---------- hero ---------- */
   .hero{position:relative;padding-top:clamp(56px,9vw,96px);padding-bottom:clamp(72px,11vw,128px);overflow-x:clip;}
   .hero-grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:56px;align-items:center;}
-  @media(max-width:900px){.hero-grid{grid-template-columns:1fr;gap:48px;text-align:center;}
-    .hero .lead{margin-left:auto;margin-right:auto;}
-    .hero-cta{justify-content:center;}
-    .panel-stage>div{align-items:center;}}
   .hero h1 span{color:var(--accent);}
   /* rotating word (tram / bus / train) */
   .rotator{display:inline-block;overflow:hidden;height:1em;line-height:1;vertical-align:bottom;}
@@ -120,12 +116,16 @@
   .panel-stage{display:flex;align-items:center;}
   /* fill the column and pin the panel (and its caption) to the right edge */
   .panel-stage>div{display:flex;flex-direction:column;align-items:flex-end;width:100%;}
+  @media(max-width:900px){.hero-grid{grid-template-columns:1fr;gap:48px;text-align:center;}
+    .hero .lead{margin-left:auto;margin-right:auto;}
+    .hero-cta{justify-content:center;}
+    .panel-stage>div{align-items:center;}}
   .led-panel{
     position:relative;width:min(420px,100%);aspect-ratio:1/1;
     background:#070605;border-radius:18px;
     padding:14px;
     border:1px solid rgba(184,118,72,.22);
-    box-shadow:0 0 0 10px #100d0b, 0 30px 80px -20px rgba(0,0,0,.9),
+    box-shadow:0 30px 80px -20px rgba(0,0,0,.9),
                0 0 60px -6px rgba(184,118,72,.35);
     display:flex;align-items:center;justify-content:center;
     overflow:hidden;
