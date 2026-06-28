@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Zügli · the little train that tells you when to run</title>
-<meta name="description" content="Zügli is a DIY Swiss transit board: one stop, one connection, a live countdown to your next departure on a glowing 64×64 LED panel. Open source. Built for about a third less than a Tramli.">
+<meta name="description" content="Zügli is a DIY Swiss transit board: pick a stop and the connections you care about — one, a few, or all of them — and watch a live countdown to your next departures on a glowing 64×64 LED panel. Open source. Built for about a third less than a Tramli.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="favicon.svg">
 
@@ -281,8 +281,8 @@
       <div class="hero-copy">
         <h1 class="reveal">Never run for the <span class="rotator" aria-label="tram, bus or train"><span class="rotator-track" aria-hidden="true"><span>tram</span><span>bus</span><span>train</span><span>tram</span></span></span> again.</h1>
         <p class="lead reveal" style="margin-top:24px;">
-          Zügli sits in your home and watches your most important connection. It counts down
-          the minutes to your next departure on a glowing LED panel, so you can see from
+          Zügli sits in your home and watches the departures you care about — one line, a few,
+          or your whole stop. It counts them down on a glowing LED panel, so you can see from
           across the room exactly when to leave. Live Swiss transit data, no app, built by you.
         </p>
         <div class="hero-cta reveal">
@@ -313,11 +313,11 @@
 <!-- ============ THE IDEA ============ -->
 <section id="idea" class="statement">
   <div class="wrap">
-    <h2 class="reveal">One stop. <br/>One connection.<br/><b>One number that matters.</b></h2>
+    <h2 class="reveal">One stop. <br/>The departures you care about.<br/><b>Nothing you don't.</b></h2>
     <p class="reveal">
       Departure apps drown you in every line, every platform, every direction. Zügli
-      does the opposite. You pick the single connection you actually take, and it shows
-      nothing else. Just the minutes until you need to leave, glowing on the shelf by your door.
+      does the opposite. Track a single connection, a handful, or every departure at your stop,
+      and it shows just those — the minutes until you need to leave, glowing on the shelf by your door.
     </p>
   </div>
 </section>
@@ -333,7 +333,7 @@
         <p class="tag">Live data</p>
         <h3>Real Swiss times, refreshed every 30 seconds.</h3>
         <p>Zügli polls the official <strong>transport.opendata.ch</strong> API for your stop,
-        keeps the next three departures of your connection, and uses the real-time delayed
+        keeps the next three departures you're tracking, and uses the real-time delayed
         time when there is one. The number on the panel is the number on the platform.</p>
       </div>
     </div>
@@ -344,12 +344,13 @@
         <h3>Set it up from your phone in two minutes.</h3>
         <p>On first power-up Zügli opens its own <strong>Zügli-Setup</strong> hotspot. Join it,
         pick your home WiFi, then open <strong>zugli.local</strong> and search for your stop.
-        Tap the connection you take, hit Save, and the panel switches over live, with no reboot
-        and nothing to install.</p>
+        Choose whether to follow one connection, a few, or the whole stop, hit Save, and the
+        panel switches over live — no reboot, nothing to install. Set the brightness or let it
+        auto-dim at night from the same page.</p>
       </div>
       <div class="feat-media">
         <img class="feat-img" src="img/config.png" width="980" height="1880"
-             alt="The Zügli config page open in a phone browser at zugli.local, searching for a stop and picking a connection." loading="lazy">
+             alt="The Zügli config page open in a phone browser at zugli.local, searching for a stop and picking the connections to track." loading="lazy">
       </div>
     </div>
 
@@ -385,7 +386,7 @@
       <div class="step-card reveal">
         <div class="step-num">2</div>
         <h3>Choose</h3>
-        <p>Open <strong>zugli.local</strong>, search your stop, and tap the one connection you ride. A live preview shows exactly what the panel will display.</p>
+        <p>Open <strong>zugli.local</strong>, search your stop, and pick the connections you ride — one, a few, or the whole stop. Hit Save and the panel switches over live.</p>
       </div>
       <div class="step-card reveal">
         <div class="step-num">3</div>

@@ -255,30 +255,34 @@ This is the on-device flow once flashed. No code, just a phone.
    current **IP address** (e.g. `192.168.1.42`). Type **`http://<that IP>`** into the
    browser instead (brief §3.3, §7.7).
 
-### 6.3 Pick your stop and connection (Phase 2 — UC2)
+### 6.3 Pick your stop and connections (Phase 2 — UC2)
 
 On the config page (brief §4.2):
 
-1. **Search a stop** — start typing; an autocomplete dropdown shows matching Swiss stops.
+1. **Choose what to track** — a switch at the top sets the mode: **Specific connections**
+   (pick the lines you care about) or **All connections** (everything at the stop).
+2. **Search a stop** — start typing; an autocomplete dropdown shows matching Swiss stops.
    Tap the one you want.
-2. **Which connection?** — a list of live connections (line badge → destination) appears.
-   Tap the one you want to track.
-3. A **preview** shows what the panel will display, with a live countdown.
+3. **Which connections?** — in *Specific connections* mode a list of live connections (line
+   badge → destination) appears; tap each one you want to track (up to 6). In *All
+   connections* mode this step is skipped.
 4. Tap **"Save to Zügli."** The device stores the selection and **switches live with no
-   reboot** — the panel starts showing the countdown within one 30 s poll cycle (brief §4.4).
+   reboot** — the panel starts showing the board within one 30 s poll cycle (brief §4.4).
 
-The config page **stays reachable** at `zugli.local` the whole time the device runs, so you
-can change the stop/line whenever you like without resetting anything (brief §2, §4.4).
+Tap the **gear icon** any time to open settings: hide city-name prefixes, set brightness,
+and auto-dim the panel at night (brief §4.6). The config page **stays reachable** at
+`zugli.local` the whole time the device runs, so you can change the stop, connections, or
+settings whenever you like without resetting anything (brief §2, §4.4).
 
 ---
 
 ## Part 7 — Factory reset (UC3)
 
 To wipe the device back to its out-of-the-box state: **hold the BOOT button for 3+
-seconds**. This clears **both** the stored WiFi credentials **and** the saved
-stop/connection, then reboots back into the `Zügli-Setup` captive portal (Part 6.1). After
-you rejoin a network you'll need to pick your stop and line again (Part 6.3) — nothing from
-the previous setup is kept (brief §7.9, §8-5).
+seconds**. This clears **both** the stored WiFi credentials **and** the saved selection
+(panel settings return to their defaults), then reboots back into the `Zügli-Setup` captive
+portal (Part 6.1). After you rejoin a network you'll need to pick your stop and connections
+again (Part 6.3) — nothing from the previous setup is kept (brief §7.9, §8-5).
 
 ---
 
@@ -293,7 +297,7 @@ the previous setup is kept (brief §7.9, §8-5).
 | Board not detected when flashing | Try the other USB-C port; use a data cable; install CP210x/CH34x driver; force download mode (Part 5.3). |
 | `zugli.local` won't open | mDNS can be flaky on some phones/networks — use the **IP shown on the panel** instead (Part 6.2 / brief §3.3, §7.7). |
 | `unknown target triple 'xtensa'` or `libclang` error | Source the `export-esp` script for your shell, then rebuild (Part 4.2 / brief §11). |
-| Panel shows `2 Schlieren --` / "no service" | No matching departure on the board right now — normal off-hours; it refreshes next poll (brief §7.7). |
+| Panel shows the stop name and "no service" | Nothing you track is departing right now — normal off-hours; it refreshes next poll (brief §7.7). |
 
 ---
 
@@ -305,5 +309,5 @@ the previous setup is kept (brief §7.9, §8-5).
 4. Install toolchain once (Part 4).
 5. `cd firmware && cargo run` to flash (Part 5).
 6. Join `Zügli-Setup` → enter home WiFi → reconnect phone → open `zugli.local` (or the IP
-   shown on the panel) → pick stop/line → Save (Part 6).
-7. Hold BOOT 3 s for a full factory reset (WiFi + saved connection) later (Part 7).
+   shown on the panel) → choose mode → pick stop/connections → Save (Part 6).
+7. Hold BOOT 3 s for a full factory reset (WiFi + saved selection) later (Part 7).

@@ -1,9 +1,10 @@
 //! Phase 3 runtime poll (PROJECT_BRIEF.md §6.2 / §7.3).
 //!
 //! Every 30 s (or immediately when the selection changes) we fetch the saved stop's
-//! stationboard over HTTPS, filter to the saved `(line, destination)`, keep the next three
-//! departures by time, compute minutes, and push them to the display. TLS uses
-//! `embedded-tls` with `TlsVerify::None` (decision §8-4 — documented in the README).
+//! stationboard over HTTPS, filter to the tracked connections (every departure in
+//! all-connections mode, or just the user's picks otherwise), keep the next three departures by
+//! time, compute minutes, and push them to the display. TLS uses `embedded-tls` with
+//! `TlsVerify::None` (decision §8-4 — documented in the README).
 
 use core::fmt::Write as _;
 
@@ -204,7 +205,8 @@ async fn fetch(
     }
 }
 
-/// Parse the stationboard body and build up to three departures for the saved connection.
+/// Parse the stationboard body and build the up-to-three soonest departures the panel should
+/// show — every connection in all-connections mode, or only the user's picks otherwise.
 fn parse_departures(body: &[u8], sel: &Selection) -> Option<Departures> {
     // Scratch space for decoding JSON `\uXXXX` escapes (e.g. `ü`); must fit the longest
     // single unescaped string, so it tracks the largest field capacity above.
@@ -212,7 +214,8 @@ fn parse_departures(body: &[u8], sel: &Selection) -> Option<Departures> {
     let (board, _) = serde_json_core::from_slice_escaped::<Board>(body, &mut unescape).ok()?;
     let now = shared::now_unix();
 
-    // Collect matching (timestamp, entry) pairs.
+    // Collect (timestamp, departure) pairs. In all-connections mode we keep every entry on the
+    // board; otherwise only the ones whose `(line, destination)` is one the user picked.
     let mut matches: Vec<(i64, Departure), 24> = Vec::new();
     for e in &board.stationboard {
         let line = e
@@ -222,7 +225,7 @@ fn parse_departures(body: &[u8], sel: &Selection) -> Option<Departures> {
             .or(e.name.as_deref())
             .unwrap_or("");
         let to = e.to.as_deref().unwrap_or("");
-        if line != sel.line.as_str() || to != sel.destination.as_str() {
+        if !tracked(sel, line, to) {
             continue;
         }
         let ts = match e.stop.departure_timestamp {
@@ -240,32 +243,35 @@ fn parse_departures(body: &[u8], sel: &Selection) -> Option<Departures> {
 
     matches.sort_unstable_by_key(|(ts, _)| *ts);
 
-    // Diagnostic: a `--` on the panel means either the clock isn't synced (so minutes can't
-    // be computed) or nothing on the board matched the saved line/destination. This says which.
+    // Diagnostic: an empty board (the panel's "no service") means either the clock isn't synced
+    // (so minutes can't be computed — though we still list entries) or nothing on the board
+    // matched the tracked connections. This says which mode is active and how much matched.
     info!(
-        "poll: parsed {} entries, {} matched '{} → {}', clock {}",
+        "poll: parsed {} entries, {} kept (mode {}, {} tracked), clock {}",
         board.stationboard.len(),
         matches.len(),
-        sel.line.as_str(),
-        sel.destination.as_str(),
+        if sel.all_connections { "all" } else { "specific" },
+        sel.connections.len(),
         if now.is_some() { "set" } else { "UNSET" },
     );
 
+    // Up to three soonest departures. Empty when nothing matched — the panel renders the stop
+    // header with a "no service" note.
     let mut out: Departures = Vec::new();
-    if matches.is_empty() {
-        // No matching departure on the board → show "<line> <dest> --" (brief §7.7).
-        let _ = out.push(Departure {
-            line: sel.line.clone(),
-            category: sel.category.clone(),
-            destination: sel.destination.clone(),
-            minutes: None,
-        });
-        return Some(out);
-    }
     for (_, dep) in matches.into_iter().take(3) {
         let _ = out.push(dep);
     }
     Some(out)
+}
+
+/// Whether a board entry's `(line, destination)` is one the panel should show: any departure in
+/// all-connections mode, otherwise only the connections the user explicitly picked.
+fn tracked(sel: &Selection, line: &str, to: &str) -> bool {
+    sel.all_connections
+        || sel
+            .connections
+            .iter()
+            .any(|c| c.line.as_str() == line && c.destination.as_str() == to)
 }
 
 fn minutes_until(departure: i64, now: i64) -> u16 {
