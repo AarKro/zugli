@@ -93,7 +93,8 @@
   .hero-grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:56px;align-items:center;}
   @media(max-width:900px){.hero-grid{grid-template-columns:1fr;gap:48px;text-align:center;}
     .hero .lead{margin-left:auto;margin-right:auto;}
-    .hero-cta{justify-content:center;}}
+    .hero-cta{justify-content:center;}
+    .panel-stage{justify-content:center;}}
   .hero h1 span{color:var(--accent);}
   /* rotating word (tram / bus / train) */
   .rotator{display:inline-block;overflow:hidden;height:1em;line-height:1;vertical-align:bottom;}
@@ -116,7 +117,7 @@
   .glow.g2{width:420px;height:420px;bottom:-220px;left:-160px;opacity:.32;}
 
   /* ---------- LED panel mock (the signature visual) ---------- */
-  .panel-stage{display:flex;justify-content:center;align-items:center;}
+  .panel-stage{display:flex;justify-content:flex-end;align-items:center;}
   .led-panel{
     position:relative;width:min(420px,100%);aspect-ratio:1/1;
     background:#070605;border-radius:18px;
