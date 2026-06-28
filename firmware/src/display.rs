@@ -306,10 +306,7 @@ pub fn draw_state(fb: &mut FBType, state: &DisplayState, frame: u32) -> bool {
         DisplayState::Connecting => draw_connecting(fb, frame),
         DisplayState::IdleAddress { octets } => draw_idle(fb, *octets, frame),
         DisplayState::Departures { station, deps } => draw_departures(fb, station, deps, frame),
-        DisplayState::Offline => {
-            draw_offline(fb);
-            false
-        }
+        DisplayState::Offline => draw_offline(fb, frame),
     }
 }
 
@@ -397,7 +394,14 @@ fn bogie(fb: &mut FBType, ox: i32, lx: i32, ly: i32) {
 fn draw_connecting(fb: &mut FBType, frame: u32) -> bool {
     // Label at the top so the user knows what's happening while WiFi comes up.
     centered(fb, "Connecting", 6, style(&FONT_5X7, AMBER), 5);
+    draw_tram_scene(fb, frame);
+    true
+}
 
+/// Draw one frame of the rolling-tram scene (catenary, rail, and the tram itself), shared by the
+/// startup "connecting" screen and the offline/reconnecting fallback. The caller draws whatever
+/// label sits above it (the scene fills the lower part of the panel, below `WIRE_Y`).
+fn draw_tram_scene(fb: &mut FBType, frame: u32) {
     // Catenary wire above, running rail with sleepers below.
     rule(fb, WIRE_Y, WIRE);
     rule(fb, RAIL_Y, RAIL);
@@ -468,8 +472,6 @@ fn draw_connecting(fb: &mut FBType, frame: u32) -> bool {
     // Bogies.
     bogie(fb, ox, 3, top + 12);
     bogie(fb, ox, 18, top + 12);
-
-    true
 }
 
 fn draw_idle(fb: &mut FBType, octets: [u8; 4], frame: u32) -> bool {
@@ -494,9 +496,15 @@ fn draw_idle(fb: &mut FBType, octets: [u8; 4], frame: u32) -> bool {
     draw_marquee(fb, addr.as_str(), 2, 42, COLS as i32 - 2, accent, 5, frame)
 }
 
-fn draw_offline(fb: &mut FBType) {
-    let dim = style(&FONT_6X10, DIM);
-    left(fb, "offline", 2, 28, dim);
+/// Offline fallback: the same rolling-tram scene as [`draw_connecting`], but labelled "offline /
+/// reconnecting" on two lines while the poll task keeps retrying. Always animating, so the render
+/// loop keeps ticking frames (and cuts straight over once a poll succeeds).
+fn draw_offline(fb: &mut FBType, frame: u32) -> bool {
+    let label = style(&FONT_5X7, AMBER);
+    centered(fb, "offline", 4, label, 5);
+    centered(fb, "reconnecting", 13, label, 5);
+    draw_tram_scene(fb, frame);
+    true
 }
 
 /// Runtime departures board: the watched stop on top, then up to three upcoming departures —
@@ -531,16 +539,24 @@ fn draw_departures(
     for (i, dep) in deps.iter().take(3).enumerate() {
         let ry = TOP + i as i32 * ROW_H;
         let badge_y = ry + 3; // 11 px badge, vertically centred in the row
-        let text_y = ry + 5; // FONT_5X7 baseline-top, centred against the badge
+        let text_y = ry + 6; // FONT_5X7 baseline-top, nudged down 1 px to sit on the badge number
 
         // Right: time-to-departure, right-aligned to the panel edge, in copper. A departure
         // leaving now (`Some(0)`) shows a front-of-tram pictogram (as SBB does) instead of text;
-        // otherwise the minutes (`--`/`N'`) are drawn as figures. `time_x` is the region's left
-        // edge, so the destination can be clipped to stop short of it either way.
+        // otherwise the minutes (`--`/`N'`) are drawn as figures. The pictogram is nudged left of
+        // the edge so it centres over the first-digit column of the other rows' times rather than
+        // sitting flush right. `time_x` is the region's left edge, so the destination clips short
+        // of it either way.
         let now = matches!(dep.minutes, Some(0));
         let mins = fmt_minutes(dep.minutes);
-        let time_w = if now { TRAIN_W } else { mins.chars().count() as i32 * 5 };
-        let time_x = COLS as i32 - 1 - time_w;
+        let time_x = if now {
+            // Centre the icon on the first glyph of a right-aligned single-digit `N'` time: that
+            // 5-px cell starts at `COLS-11`, so shift by half the width difference to the icon.
+            const FIRST_DIGIT_X: i32 = COLS as i32 - 1 - 2 * 5;
+            FIRST_DIGIT_X + (5 - TRAIN_W) / 2
+        } else {
+            COLS as i32 - 1 - mins.chars().count() as i32 * 5
+        };
         if now {
             draw_train_front(fb, time_x, ry + 4, ACCENT);
         } else {

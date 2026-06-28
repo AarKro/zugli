@@ -13,7 +13,7 @@ use embassy_futures::select::{Either, select};
 use embassy_net::Stack;
 use embassy_net::dns::DnsSocket;
 use embassy_net::tcp::client::{TcpClient, TcpClientState};
-use embassy_time::{Duration, Timer, with_timeout};
+use embassy_time::{Duration, Instant, Timer, with_timeout};
 use heapless::{String, Vec};
 use log::{info, warn};
 use reqwless::client::{HttpClient, TlsConfig, TlsVerify};
@@ -43,15 +43,23 @@ const FETCH_TIMEOUT_SECS: u64 = 15;
 // destination like "Zürich, Klusplatz" would never match. Capacities mirror `Selection`.
 #[derive(Deserialize)]
 struct Board {
-    stationboard: Vec<Entry, 24>,
+    // Sized to the request's `limit=20` (below). This whole struct is built on core 0's stack
+    // during the (synchronous, stack-heavy) JSON parse, so keep it no larger than the API returns.
+    stationboard: Vec<Entry, 20>,
 }
 
+// Field capacities are deliberately LARGER than what we display/store (`Departure` truncates via
+// `str_to` to line 16 / category 12 / destination 48). `serde_json_core` fails the WHOLE board
+// deserialize if any single field overflows its `String`, so one untracked oddball — a long
+// destination, or a category like "Standseilbahn" (13 > 12) — would otherwise blank every
+// departure until it rolls off. Tracked-connection matching is unaffected: a connection the user
+// could save is itself ≤ the `Selection` caps, so its live `to`/line still fits and compares equal.
 #[derive(Deserialize)]
 struct Entry {
-    category: Option<String<12>>,
-    number: Option<String<16>>,
-    name: Option<String<16>>,
-    to: Option<String<48>>,
+    category: Option<String<24>>,
+    number: Option<String<24>>,
+    name: Option<String<24>>,
+    to: Option<String<64>>,
     stop: EntryStop,
 }
 
@@ -76,14 +84,21 @@ pub async fn poll_task(stack: Stack<'static>, seed: u64) {
     // network is up just burns a failed attempt and flashes the offline screen on boot.
     stack.wait_config_up().await;
 
+    // Start of the current unbroken run of failed polls (`None` once a poll succeeds). The
+    // offline screen only appears once this run reaches `OFFLINE_AFTER_SECS`; until then the
+    // last good board stays up, so a transient hiccup never flashes "offline / reconnecting".
+    let mut failing_since: Option<Instant> = None;
+
     loop {
         let selection = SELECTION.lock().await.clone();
         // How long to wait before the next poll: the normal interval after a good poll or an
         // idle screen, but a short retry after a failure so a transient hiccup recovers fast.
         let delay = match selection {
             None => {
-                // No connection chosen yet: show the address screen (brief §7.7).
+                // No connection chosen yet: show the address screen (brief §7.7). Not polling,
+                // so any earlier failure streak no longer applies.
                 info!("poll: no selection set — showing idle screen, not polling");
+                failing_since = None;
                 if let Some(octets) = shared::device_ip() {
                     DISPLAY.signal(DisplayState::IdleAddress { octets });
                 }
@@ -110,6 +125,7 @@ pub async fn poll_task(stack: Stack<'static>, seed: u64) {
                 match attempt {
                     Ok(Ok(deps)) => {
                         info!("poll: {} departures", deps.len());
+                        failing_since = None;
                         DISPLAY.signal(DisplayState::Departures {
                             station: sel.stop_name.clone(),
                             deps,
@@ -118,12 +134,12 @@ pub async fn poll_task(stack: Stack<'static>, seed: u64) {
                     }
                     Ok(Err(())) => {
                         warn!("poll: fetch failed");
-                        DISPLAY.signal(DisplayState::Offline);
+                        offline_if_persistent(&mut failing_since);
                         crate::POLL_RETRY_SECS
                     }
                     Err(_) => {
                         warn!("poll: fetch timed out after {FETCH_TIMEOUT_SECS}s");
-                        DISPLAY.signal(DisplayState::Offline);
+                        offline_if_persistent(&mut failing_since);
                         crate::POLL_RETRY_SECS
                     }
                 }
@@ -140,6 +156,17 @@ pub async fn poll_task(stack: Stack<'static>, seed: u64) {
             Either::First(_) => {}
             Either::Second(_) => info!("poll: selection changed, re-polling"),
         }
+    }
+}
+
+/// Handle a failed poll: record the start of the failure streak (if this is its first failure),
+/// and only push the offline screen once the streak has lasted `OFFLINE_AFTER_SECS`. Below that
+/// nothing is signalled, so the last good board stays on the panel through a brief outage.
+fn offline_if_persistent(failing_since: &mut Option<Instant>) {
+    let now = Instant::now();
+    let start = *failing_since.get_or_insert(now);
+    if now.duration_since(start) >= Duration::from_secs(crate::OFFLINE_AFTER_SECS) {
+        DISPLAY.signal(DisplayState::Offline);
     }
 }
 
@@ -208,15 +235,23 @@ async fn fetch(
 /// Parse the stationboard body and build the up-to-three soonest departures the panel should
 /// show — every connection in all-connections mode, or only the user's picks otherwise.
 fn parse_departures(body: &[u8], sel: &Selection) -> Option<Departures> {
-    // Scratch space for decoding JSON `\uXXXX` escapes (e.g. `ü`); must fit the longest
-    // single unescaped string, so it tracks the largest field capacity above.
-    let mut unescape = [0u8; 64];
-    let (board, _) = serde_json_core::from_slice_escaped::<Board>(body, &mut unescape).ok()?;
+    // Scratch space for decoding JSON `\uXXXX` escapes (e.g. `ü`); must fit the longest single
+    // unescaped string, so it tracks the largest field capacity above (`to`, now 64).
+    let mut unescape = [0u8; 96];
+    let board = match serde_json_core::from_slice_escaped::<Board>(body, &mut unescape) {
+        Ok((b, _)) => b,
+        // Log the specific error (e.g. an over-capacity field) so a recurring failure is
+        // diagnosable rather than a generic "parse failed".
+        Err(e) => {
+            warn!("poll: stationboard deserialize failed: {e:?}");
+            return None;
+        }
+    };
     let now = shared::now_unix();
 
     // Collect (timestamp, departure) pairs. In all-connections mode we keep every entry on the
     // board; otherwise only the ones whose `(line, destination)` is one the user picked.
-    let mut matches: Vec<(i64, Departure), 24> = Vec::new();
+    let mut matches: Vec<(i64, Departure), 20> = Vec::new();
     for e in &board.stationboard {
         let line = e
             .number

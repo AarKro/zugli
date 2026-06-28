@@ -125,6 +125,7 @@ pub enum DisplayState {
         station: String<64>,
         deps: Departures,
     },
-    /// Poll failed / network lost — subtle offline indicator (brief §7.7).
+    /// Poll failed / network lost — the rolling-tram scene (as [`Connecting`](Self::Connecting))
+    /// labelled "offline / reconnecting" while the poll task retries (brief §7.7).
     Offline,
 }

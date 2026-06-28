@@ -97,12 +97,17 @@ async fn main(spawner: Spawner) -> ! {
             spawner.spawn(display::render_task(ex_a, ex_b, fb0).unwrap());
         });
     };
-    // Generous stack for the render core: the scrolling-marquee path nests embedded-graphics
-    // text rendering for two animated headings plus the large time font every frame. Placed
-    // in static memory via ConstStaticCell — `Stack::new()` is const, so the 32 KB value is
-    // built at compile time and NOT materialised as a temporary on main's own stack (doing so
-    // bloated main's frame and overflowed its stack at boot, in `framebuffers()`).
-    static APP_CORE_STACK: ConstStaticCell<Stack<32768>> = ConstStaticCell::new(Stack::new());
+    // Stack for the render core. Keep this SMALL: per esp-hal's `stack.x`, core 0's main stack is
+    // whatever DRAM is left over after all static data, so every byte reserved here is a byte
+    // taken away from core 0 — and core 0 runs the stack-heavy stationboard JSON parse (an earlier
+    // oversized value here starved it into a guaranteed overflow on the first poll). The render
+    // task's `async` locals live in the embassy task arena, not on this stack, so it only needs
+    // room for its deepest *synchronous* draw call (embedded-graphics glyph rendering, a few KB);
+    // 16 KB leaves a wide margin even with the hub75 DMA interrupt nesting on top. Placed in
+    // static memory via ConstStaticCell — `Stack::new()` is const, so the value is built at
+    // compile time and NOT materialised as a temporary on main's own stack (which overflowed
+    // main at boot). If the render core ever faults, raise this — but watch core 0's headroom.
+    static APP_CORE_STACK: ConstStaticCell<Stack<16384>> = ConstStaticCell::new(Stack::new());
     let app_core_stack = APP_CORE_STACK.take();
     esp_rtos::start_second_core(p.CPU_CTRL, sw_ints.software_interrupt1, app_core_stack, cpu1);
 

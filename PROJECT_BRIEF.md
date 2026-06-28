@@ -614,7 +614,7 @@ through one choke point, so the whole board dims uniformly.
 | Departing now | show a front-of-tram pictogram in the time column for that row |
 | Fewer than 3 matches | show however many qualified |
 | Nothing tracked is departing | the stop header with a "no service" note |
-| API unreachable / poll failed | a subtle "offline" indicator; retry next cycle |
+| API unreachable / poll failed | the rolling-tram scene labelled "offline / reconnecting" on two lines; retry next cycle |
 | WiFi lost | reconnect attempts; if creds invalid, fall to Phase 1 |
 | Booting / no selection yet | **show the device address on the panel**: `zugli.local` and the current IP (e.g. `192.168.1.42`), so the user knows where to configure it. This is the primary way the IP fallback is discovered. |
 

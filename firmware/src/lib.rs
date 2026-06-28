@@ -32,6 +32,9 @@ pub const HOSTNAME: &str = "zugli";
 pub const POLL_INTERVAL_SECS: u64 = 30;
 /// Shorter retry cadence after a failed poll, so a transient network hiccup recovers fast.
 pub const POLL_RETRY_SECS: u64 = 5;
+/// How long polling must fail *continuously* before the panel falls to the offline screen. Below
+/// this the last board stays up, so a brief hiccup never flashes "offline / reconnecting".
+pub const OFFLINE_AFTER_SECS: u64 = 60;
 
 /// Leak a value into a `'static` via a `StaticCell`. Panics if called twice for one cell.
 #[macro_export]
