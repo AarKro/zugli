@@ -43,8 +43,13 @@ const FETCH_TIMEOUT_SECS: u64 = 15;
 // destination like "Zürich, Klusplatz" would never match. Capacities mirror `Selection`.
 #[derive(Deserialize)]
 struct Board {
-    // Sized to the request's `limit=20` (below). This whole struct is built on core 0's stack
-    // during the (synchronous, stack-heavy) JSON parse, so keep it no larger than the API returns.
+    // Capacity 20, but the request asks for only `limit=16` (below): the opendata.ch API does NOT
+    // honour `limit` exactly — it returns `limit + 1` or `+ 2` entries when departures share a
+    // timestamp near the cutoff. serde_json_core fails the WHOLE board deserialize (`CustomError`)
+    // the instant a `heapless::Vec` overflows, so the request stays well under the Vec's capacity
+    // to leave headroom for that overage. Don't grow this Vec to widen the gap instead: commit
+    // 78c5126 shrank it 24 -> 20 to stop a core-0 stack overflow (this struct is built on the
+    // stack during the synchronous JSON parse), so the slack has to come from a smaller request.
     stationboard: Vec<Entry, 20>,
 }
 
@@ -189,7 +194,7 @@ async fn fetch(
     let mut url: String<320> = String::new();
     write!(
         url,
-        "https://transport.opendata.ch/v1/stationboard?id={}&limit=20\
+        "https://transport.opendata.ch/v1/stationboard?id={}&limit=16\
          &fields%5B%5D=stationboard/number\
          &fields%5B%5D=stationboard/name\
          &fields%5B%5D=stationboard/category\
