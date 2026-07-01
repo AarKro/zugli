@@ -12,10 +12,15 @@
 Add an on-phone **layout builder** to the Zügli config page. The user gets a simulated
 **64×64 LED panel** on screen and can **add**, **move**, and **resize/scale** elements
 (text, clock, the live departures block, dividers, icons…) to design their own board.
-Exactly **one** custom layout is stored at a time (no versioning, no history). When a custom
-layout exists the firmware renders it in place of the built-in departures board (PB §7.7);
-when none exists, the built-in board is used unchanged. The editor loads the saved custom
-layout if present, otherwise starts from an empty canvas.
+Exactly **one** custom layout is stored at a time (no versioning, no history). The editor
+loads the saved custom layout if present, otherwise starts from an empty canvas.
+
+The device's departures screen is drawn according to a user-selected **UI mode**, chosen from
+a three-way selector on the config page: **Default** (the built-in departures board, PB §7.7),
+**Focus** (the existing focus view), or **Custom** (the user's built layout). The custom
+layout is shown **only when Custom is selected** — it never overrides Default or Focus merely
+by existing. This reworks the current two-way Default/Focus toggle into a three-way selector;
+the Focus view itself is unchanged.
 
 The whole feature must be **phone-first**: the editor is a full-screen, touch-driven surface
 served from the same self-contained `web/index.html`, and the on-screen simulator must be a
@@ -39,8 +44,9 @@ faithful, pixel-accurate preview of what the physical panel will draw.
 - **Low blast radius.** The custom layout only governs the **running departures screen**.
   Provisioning, connecting, idle-address and offline states keep their built-in rendering,
   so a badly-designed layout can never lock the user out of setup or recovery.
-- **Reversible by design.** One-tap "Reset to default" restores the built-in board, so the
-  feature is safe to ship: worst case, the user reverts.
+- **Reversible by design.** The custom layout only renders when the user picks **Custom**;
+  one tap on **Default** (or **Focus**) in the mode selector restores a built-in view
+  instantly, so the feature is safe to ship — worst case, the user switches modes.
 
 ### Target user & job-to-be-done
 "I've mounted Zügli on my shelf. I want the stop name bigger, a clock in the corner, and only
@@ -52,6 +58,8 @@ flashing new firmware."
 ## 3. Goals and non-goals
 
 ### Goals
+- A **three-way UI-mode selector** (Default / Focus / Custom) on the config page that chooses
+  what the panel draws. The custom layout renders only when Custom is selected.
 - A full-screen, touch-first layout editor reachable from the config page.
 - A **pixel-accurate** 64×64 simulator that mirrors the firmware's fonts, palette, and
   coordinate system.
@@ -59,7 +67,7 @@ flashing new firmware."
   the moment the editor opens, so the phone simulator and the device stay in lock-step while
   the user designs.
 - Add / move / resize / delete elements; edit per-element properties; nudge for pixel
-  precision; reset to default.
+  precision; clear the custom layout.
 - A **compact, versioned** layout schema that round-trips phone ⇄ flash ⇄ firmware renderer.
 - Firmware renders the custom layout live on `Save`, no reboot (mirrors PB §4.4 behaviour).
 
@@ -83,29 +91,41 @@ stop search, a connection list, a `Save` button, and a **settings bottom-sheet**
 gear icon. The builder is added as a **full-screen overlay editor**, launched from a new,
 discoverable entry point, and returning the user to the same page on close.
 
-### 4.1 Entry point (recommended: a labelled card on the main page)
+### 4.1 Main-page controls: UI-mode selector + builder entry
 
-**Recommendation:** add a full-width **secondary card/button** on the main config page,
-directly beneath the `save-section`, labelled **"Design your board →"** with a small **live
-thumbnail** of the current layout (a scaled-down, non-interactive render of the simulator) on
-its left. If no custom layout exists, the thumbnail shows the built-in board and the caption
-reads "Default layout"; if one exists, the caption reads "Custom layout".
+Two related controls sit together on the main config page, directly beneath the
+`save-section`.
 
-Rationale (industry standard for this class of feature — cf. LaMetric, Divoom Pixoo,
-smart-display "design" tabs):
-- **Discoverability.** A layout designer is a flagship feature; burying it in the settings
-  sheet (which is for small display toggles) hides it. A thumbnail communicates current
-  state *and* invites editing in one glance — the standard "edit your design" affordance.
-- **Separation of concerns.** The gear sheet stays about *display toggles*; the card is about
-  *composition*. This keeps the main flow (pick a stop → save) uncluttered.
+**(a) UI-mode selector (segmented control).** A full-width, three-segment control —
+**Default | Focus | Custom** — reworking the existing two-way Default/Focus toggle. It uses
+the same visual language as the tracking-mode switch already at the top of the page (`.mode`
+segments: the active segment highlighted like a selected connection). Selecting a segment:
+- writes the new mode to the board immediately (optimistic `POST /config`, §7.4/§8.4 — the
+  same pattern the settings sheet uses), so the panel switches live;
+- **Default / Focus** switch the panel to the respective built-in view at once;
+- **Custom** shows the user's saved layout. If **no** custom layout exists yet, tapping Custom
+  instead **opens the builder** (create flow, §4.2) rather than switching the panel to an
+  empty screen; Custom becomes the live mode once a layout is saved (§4.3 / §4.6).
 
-The card is a distinct visual weight from the primary `Save to Zügli` button (secondary
-styling: surface background, copper text/outline) so it never competes with the primary save
-action.
+**(b) Builder entry card.** A full-width **secondary card/button** labelled **"Design your
+board →"** with a small **live thumbnail** of the current custom layout (a scaled-down,
+non-interactive render of the simulator) on its left. The caption reads "No custom layout yet"
+when none exists, otherwise "Custom layout". Tapping it opens the full-screen editor (§4.2).
 
-> Alternative considered: a row inside the settings sheet ("Board layout ›"). Rejected as
-> primary because it under-sells the feature and the sheet is modal-over-modal awkward on a
-> phone. It may additionally be offered there for users who look in Settings first.
+Rationale:
+- **Discoverability & industry standard** (cf. LaMetric, Divoom Pixoo, smart-display "design"
+  tabs): the selector makes the three views a first-class, one-tap choice, and the thumbnail
+  communicates the custom design's state *and* invites editing in one glance.
+- **Separation of concerns.** The gear/settings sheet stays about *display toggles* (brightness,
+  hide-city, badges); the main-page controls own *which view* and *composition*. This keeps
+  the primary flow (pick a stop → save) uncluttered.
+- **Selecting ≠ designing.** Choosing the Custom *mode* and *editing* the custom layout are
+  distinct actions with distinct controls, so a user can switch to Custom without being forced
+  into the editor once a layout exists.
+
+The card and selector are a distinct visual weight from the primary `Save to Zügli` button
+(secondary styling: surface background, copper text/outline) so they never compete with the
+primary save action.
 
 ### 4.2 Editor screen anatomy (full-screen overlay)
 
@@ -153,17 +173,20 @@ simulator.
 - **On every edit:** move / resize / add / delete / property change re-pushes the working copy
   via a **debounced** `POST /preview` (~150–250 ms) so the panel tracks the design without
   flooding the device with a request per drag-pixel.
-- **Transient, never persisted.** `/preview` updates the device's *live* layout mirror only;
-  nothing is written to flash until **Save** (§4.6). The panel shows the design; a reboot or a
-  timeout (below) reverts to the last saved layout.
+- **Transient, never persisted, mode-independent.** `/preview` updates the device's *live*
+  layout mirror only; nothing is written to flash until **Save** (§4.6). The preview shows the
+  working layout **regardless of the current UI mode** — you can design a Custom layout while
+  the persisted mode is still Default or Focus, and the panel previews your draft the whole
+  time. A reboot or a timeout (below) reverts to the persisted mode + layout.
 - **Idle keepalive + auto-revert safety.** While the editor is open the page sends a keepalive
   `POST /preview` (reusing the latest working copy) every ~5 s. The firmware arms an
   **auto-revert timer** (~15 s) on each preview push; if it expires without a new push — the
-  phone locked, lost WiFi, or the tab was closed — the device reloads the persisted layout and
-  leaves preview mode, so the panel can never get stuck showing an abandoned draft.
-- **On close (Save or Cancel):** the editor ends preview explicitly (`POST /preview/end`,
-  §7.4). After a **Save** the persisted and preview layouts are identical, so the panel is
-  already correct; after a **Cancel** the device reverts to the saved layout.
+  phone locked, lost WiFi, or the tab was closed — the device leaves preview mode and reverts
+  to its persisted UI mode + layout, so the panel can never get stuck showing an abandoned draft.
+- **On close (Save or Cancel):** the editor ends preview explicitly (`POST /preview/end`, §7.4).
+  A **Save** persists the layout **and sets the UI mode to Custom** (§4.6), so the design stays
+  on the panel; a **Cancel** reverts the device to its persisted mode + layout (whatever it was
+  before editing).
 
 ### 4.4 Adding elements
 
@@ -208,36 +231,39 @@ simulator.
 
 - The editor keeps a working copy of the layout array. Any mutation marks it **dirty** and
   enables **Save**.
-- **Save:** `POST /layout` with the serialized layout (§5). Optimistic UX identical to the
-  existing `/config` flow (`applyChange` in `web/index.html`): show "Saved — Zügli is
-  updating." on success; on failure keep the editor open, surface "Couldn't reach Zügli — try
-  again.", and do not close. On success, update the main-page thumbnail and close the editor.
+- **Save:** `POST /layout` with the serialized layout (§5), then set the UI mode to **Custom**
+  (`POST /config`, §7.4) so the freshly-saved design is what the panel shows. Optimistic UX
+  identical to the existing `/config` flow (`applyChange` in `web/index.html`): show "Saved —
+  Zügli is updating." on success; on failure keep the editor open, surface "Couldn't reach
+  Zügli — try again.", and do not close. On success, update the main-page thumbnail, reflect
+  **Custom** as the selected mode in the selector (§4.1), and close the editor.
 - **Cancel:** if dirty, confirm ("Discard changes?"); otherwise close immediately.
 - **Optional single-step in-editor undo:** a lightweight `Ctrl-Z`-style "Undo" affordance that
   reverts the last edit *within the current editing session only*. This is not persisted
   history and does not contradict the "one layout, no history" storage rule. Ship only if
   cheap; otherwise omit.
 
-### 4.7 Reset to default
+### 4.7 Clear custom layout
 
-- A **"Reset to default"** action lives in the editor (e.g. an overflow item in the app bar,
-  or a footer button under the palette). It clears the custom layout: `POST /layout` with an
-  **empty layout** (or `DELETE /layout`, see §7.4), after a confirm dialog. The firmware then
-  falls back to the built-in board (PB §7.7). The main-page thumbnail reverts to "Default
-  layout".
+- A **"Clear custom layout"** action lives in the editor (e.g. an overflow item in the app bar,
+  or a footer button under the palette). It clears the saved layout — `POST /layout` with an
+  **empty layout** (§7.4) — and, because there is then nothing custom to show, sets the UI mode
+  back to **Default** (`POST /config`), after a confirm dialog. The main-page thumbnail reverts
+  to "No custom layout yet" and the selector returns to **Default**. (This does not touch the
+  Focus view.)
 
 ### 4.8 Relationship to existing display settings (important)
 
 The settings sheet (PB §4.6) has **Hide city names** and **Line badges** toggles that shape
-the built-in board. With a custom layout active, the **departures element owns those choices
+the built-in board. With **Custom** mode active, the **departures element owns those choices
 per-element** (its own `stripCity` / `showBadge` props). Decision:
 
-- When a **custom layout is active**, the global *Hide city names* and *Line badges* toggles
-  apply **only to the built-in fallback**, not to the custom board. To avoid confusion, show
-  a one-line note in the settings sheet when a custom layout exists: *"A custom layout is
-  active — these apply to the default layout."*
+- When the UI mode is **Custom**, the global *Hide city names* and *Line badges* toggles apply
+  **only to the Default board** (and Focus, where relevant), not to the custom layout. To
+  avoid confusion, show a one-line note in the settings sheet when the mode is Custom: *"Custom
+  layout is active — these apply to the Default view."*
 - **Brightness / auto-dim** are global and **always apply** (they scale the whole palette at
-  the render choke point — PB §7.7 / `display::scaled`), custom layout or not.
+  the render choke point — PB §7.7 / `display::scaled`), in every mode.
 
 ---
 
@@ -275,7 +301,7 @@ Compact keys to fit flash. Example:
 
 - `v` — schema version (`u8`), currently `1`.
 - `e` — array of elements, max `MAX_ELEMENTS` (§5.5). An **empty `e`** means "no custom
-  layout" (equivalent to reset-to-default).
+  layout saved"; in Custom mode the firmware falls back to the Default board (§7.5).
 
 ### 5.4 Element schema (flat struct, numeric `t` tag)
 
@@ -390,6 +416,13 @@ already noted in `storage.rs`).
   text). Add `pub const MAX_ELEMENTS: usize = 16;`. Derive `Clone, Debug, Serialize,
   Deserialize`. Use short serde `rename` keys matching §5.
 - Do **not** use a data-carrying Rust enum for elements (serde-json-core limitation, §5.1).
+- **UI mode.** Replace the existing boolean Default/Focus toggle in `Config` (the uncommitted
+  `focus`-style field) with a three-state **`ui_mode`** (JSON `uiMode`): `0 = Default`,
+  `1 = Focus`, `2 = Custom`. Represent it as a `u8` (or a small `#[repr(u8)]` enum that
+  serializes as an integer) with `#[serde(default)]` → `0`, so older flash records and the
+  existing config round-trip. This lives in `Config`, so it persists and is edited through the
+  existing `/config` endpoint (§7.4). The old boolean maps forward as `false → Default`,
+  `true → Focus`.
 
 ### 7.2 `storage.rs`
 - Add `layout: Option<Layout>` to `Persisted` (with `#[serde(default)]`).
@@ -399,13 +432,20 @@ already noted in `storage.rs`).
 - Apply the buffer/size changes from §6.
 
 ### 7.3 `shared.rs`
-- Add a **live layout mirror** for the render task — the layout the panel currently draws.
-  Because a `Layout` is larger than an atomic, store it behind a `Mutex<CriticalSectionRawMutex,
+- Add a **live layout mirror** for the render task — the persisted custom layout. Because a
+  `Layout` is larger than an atomic, store it behind a `Mutex<CriticalSectionRawMutex,
   Option<Layout>>` (like `SELECTION`), **not** the render-task-must-never-block atomics used for
-  config scalars. The render task reads it when drawing the Departures state; acceptable because
-  a departures redraw is already event-driven, not per-DMA-frame.
-- `apply_layout(Option<Layout>)` sets the live mirror and signals a redraw. Called at boot
-  (from flash), on `POST /layout` (persisted), and on `POST /preview` (transient).
+  config scalars. The render task reads it (in Custom mode) when drawing the Departures state;
+  acceptable because a departures redraw is already event-driven, not per-DMA-frame.
+- **UI mode accessor.** Add `ui_mode()` reading the `uiMode` field mirrored from `Config`
+  (fold it into the existing config live-mirror / `apply_config`, alongside brightness etc.),
+  so the render dispatch (§7.5) is a cheap read.
+- `apply_layout(Option<Layout>)` sets the persisted-layout mirror. Called at boot (from flash)
+  and on `POST /layout`.
+- **Preview accessors** for §7.5: a `preview_active()` flag and the transient `preview_layout()`
+  set by `POST /preview` and cleared by `POST /preview/end` / the watchdog. Keep the transient
+  preview layout separate from the persisted-layout mirror so ending preview restores the real
+  persisted mode + layout without a re-fetch.
 - **Preview state** for the live on-panel preview (§4.3): a flag that the mirror currently
   holds a *transient* (unsaved) layout, plus a preview **deadline** (`AtomicI64`/`AtomicU32`
   holding an `Instant`-derived expiry). Set on each preview push; cleared when preview ends or
@@ -426,26 +466,46 @@ already noted in `storage.rs`).
   touching flash, mark preview active, and (re)arm
   the auto-revert deadline (~15 s). Signals a redraw. Respond `{"ok":true}`. This is the
   high-frequency endpoint (debounced edits + ~5 s keepalive), so it must not write flash.
-- `POST /preview/end` → discard the transient preview: reload the **persisted** layout and
-  `apply_layout` it, clear preview state. Called on editor Cancel (and harmlessly after Save).
+- `POST /preview/end` → discard the transient preview: leave preview mode and re-render the
+  device's **persisted UI mode + layout** (Default / Focus / Custom), clear preview state.
+  Called on editor Cancel (and harmlessly after Save). Because preview is mode-independent
+  (§4.3), this is how the panel returns to whatever mode was selected before editing.
 - **Auto-revert watchdog:** while preview is active, a timer (a small dedicated task, or folded
   into the existing render/poll timing) checks the deadline; on expiry it behaves exactly like
   `POST /preview/end` so an abandoned session (phone locked / WiFi dropped / tab closed) cannot
   leave the panel stuck on an unsaved draft.
-- **Reset:** a `POST /layout` with empty `e` clears the saved layout (kept as one route rather
-  than a separate `DELETE`, to keep the table minimal).
+- **UI mode is *not* a new endpoint.** Selecting Default / Focus / Custom is a `Config` change,
+  so it flows through the **existing `GET`/`POST /config`** (`uiMode` field, §7.1). The
+  main-page selector, the Save-sets-Custom step (§4.6), and Clear-sets-Default (§4.7) all POST
+  `/config`. The clamp on `POST /config` must reject an out-of-range `uiMode`.
+- **Clear custom layout:** a `POST /layout` with empty `e` clears the saved layout (kept as one
+  route rather than a separate `DELETE`, to keep the table minimal); the page pairs it with a
+  `POST /config` setting `uiMode = Default`.
 - Register all routes in `config_server_task`'s `Router`. The `/preview` body is the same size
   as `/layout`, so the §6 HTTP-buffer sizing already covers it.
 
 ### 7.5 `display.rs` — the renderer (the core work)
-- The Departures branch of `draw_state` gains a fork:
+- The Departures branch of `draw_state` dispatches on the **UI mode** (`shared::ui_mode()`),
+  **not** on whether a custom layout exists — a custom layout never renders unless Custom is
+  the selected mode. During a live preview (§4.3) the transient mirror forces the custom path
+  regardless of mode:
   ```
-  DisplayState::Departures { station, deps } =>
-      match live custom layout {
-          Some(layout) => draw_custom_layout(fb, layout, station, deps, frame),
-          None          => draw_departures(fb, station, deps, frame),   // unchanged built-in
+  DisplayState::Departures { station, deps } => {
+      if preview_active() {
+          draw_custom_layout(fb, preview_layout(), station, deps, frame)
+      } else {
+          match ui_mode() {
+              UiMode::Default => draw_departures(fb, station, deps, frame), // unchanged built-in
+              UiMode::Focus   => draw_focus(fb, station, deps, frame),      // existing focus view
+              UiMode::Custom  => match custom_layout() {
+                  Some(l) if !l.e.is_empty() => draw_custom_layout(fb, &l, station, deps, frame),
+                  _ => draw_departures(fb, station, deps, frame),           // Custom w/ no layout → Default
+              },
+          }
       }
+  }
   ```
+  (`draw_focus` is assumed to already exist; this feature does not modify it.)
 - `draw_custom_layout` iterates `layout.e` in order and dispatches on `t`, reusing existing
   primitives: `left` / `centered` / `draw_marquee` / `draw_marquee_clipped` (text, station,
   clock, date), a parameterized extraction of `draw_departures`' row logic (Departures block:
@@ -461,8 +521,8 @@ already noted in `storage.rs`).
   `draw_departures`). The clock/date do not themselves force animation; they refresh on the
   existing `BRIGHTNESS_REFRESH_SECS` static-screen wake, which is adequate for `HH:MM`.
 - **Defensive rendering:** clamp/skip out-of-range or off-panel elements; never panic
-  (`pset` already clips). An empty layout (`e == []`) is treated as "no custom layout" →
-  built-in board.
+  (`pset` already clips). In Custom mode an empty/missing layout (`e == []`) falls back to the
+  Default board, so the panel is never blank.
 - **Other states unchanged:** Provisioning / Connecting / IdleAddress / Offline keep their
   built-in rendering (§3 non-goals).
 
@@ -477,10 +537,17 @@ already noted in `storage.rs`).
 Everything stays inline (no new files, no CDNs — PB §4.1 / §8-7), consistent with the current
 self-contained page.
 
-### 8.1 Entry card + thumbnail
-- Add the "Design your board" secondary card beneath `#save-section` (§4.1). The thumbnail is
-  a small `<canvas>` rendered by the same simulator draw routine at reduced scale, refreshed
-  after each successful save and on page load (from `GET /layout`).
+### 8.1 UI-mode selector + entry card
+- **Mode selector.** Add a full-width three-segment control (Default / Focus / Custom) beneath
+  `#save-section` (§4.1), styled like the existing `.mode` tracking switch. Its value binds to
+  `cfg.uiMode`; on tap it calls the existing `applyChange(() => { cfg.uiMode = … })` path
+  (optimistic `POST /config`, revert-on-failure). Tapping **Custom** when no saved layout
+  exists opens the editor instead of setting the mode (§4.1). Reflect the live `uiMode` after
+  Save/Clear and on page load (from `GET /config`).
+- **Entry card + thumbnail.** Add the "Design your board" secondary card beneath the selector
+  (§4.1). The thumbnail is a small `<canvas>` rendered by the same simulator draw routine at
+  reduced scale, refreshed after each successful save and on page load (from `GET /layout`);
+  it reads "No custom layout yet" when `e` is empty.
 
 ### 8.2 The simulator (fidelity is the whole point)
 - A `<canvas>` renderer that draws the 64×64 grid as LED dots and paints elements **using the
@@ -506,18 +573,22 @@ self-contained page.
 - Enforce all §5.5 bounds client-side (belt-and-suspenders with the firmware).
 
 ### 8.4 Networking & live-preview driver
-- `GET /layout` on page load (thumbnail) and on editor open (seed the working copy).
+- `GET /layout` on page load (thumbnail) and on editor open (seed the working copy);
+  `GET /config` already loads `uiMode` for the selector.
+- **UI mode:** the selector POSTs `/config` with the new `uiMode` (existing optimistic path).
 - **Live on-panel preview (§4.3):** on editor open, immediately `POST /preview` with the
   working copy; on every edit, `POST /preview` **debounced** ~150–250 ms; while idle in the
   editor, a **keepalive** `POST /preview` every ~5 s to hold the panel in preview and reset the
   firmware auto-revert timer. Preview posts are fire-and-forget (a dropped one is corrected by
   the next edit or keepalive) and must not block the UI — coalesce so only the latest working
   copy is in flight.
-- **Save:** `POST /layout` (persist), then `POST /preview/end`; update the thumbnail and close.
-- **Cancel:** `POST /preview/end` (panel reverts to the saved layout), then close.
-- **Reset:** `POST /layout` with empty `e`.
+- **Save:** `POST /layout` (persist), then `POST /config` setting `uiMode = Custom`, then
+  `POST /preview/end`; update the thumbnail, reflect Custom in the selector, and close.
+- **Cancel:** `POST /preview/end` (panel reverts to the persisted mode + layout), then close.
+- **Clear custom layout:** `POST /layout` with empty `e`, then `POST /config` setting
+  `uiMode = Default`.
 - Reuse the optimistic status pattern and 8 s abort timeout already used by `/save` for the
-  Save / Reset calls; keepalive/preview calls use a short timeout and no user-facing error.
+  Save / Clear calls; keepalive/preview calls use a short timeout and no user-facing error.
 
 ---
 
@@ -527,7 +598,11 @@ self-contained page.
 - **Layout references live data that's absent:** Departures/Station render "no service"/empty
   gracefully (as the built-in board already does); Clock/Date before SNTP sync render a
   placeholder (`--:--`) rather than a wrong time (`now_unix()` returns `None` pre-sync).
-- **Empty layout saved:** treated as reset-to-default (built-in board).
+- **Custom mode with no/empty layout:** the firmware falls back to the Default board so the
+  panel is never blank (§7.5); the main-page UI steers around this by opening the editor when
+  Custom is tapped without a saved layout, and Clear-custom-layout resets the mode to Default.
+- **Mode is Custom, then layout cleared elsewhere** (e.g. BOOT reset wipes the record): `uiMode`
+  is also reset to Default by that same wipe; even if it weren't, the §7.5 fallback covers it.
 - **Over-budget layout:** the editor prevents it (disables Add at the byte cap, §4.4); if one
   still arrives — a crafted POST — the firmware rejects it with an error and does **not** write
   flash (§6 pt. 2 / §7.4), so a too-large layout can never partially overwrite the record.
@@ -549,20 +624,26 @@ self-contained page.
 
 A suggested order that keeps each step independently verifiable. All of it is v1.
 
-1. **Schema + storage plumbing.** `Layout`/`Element` types, `Persisted.layout`, the §6 buffer
-   and stack bumps, `GET`/`POST /layout`, `apply_layout`, boot load. *Verify:* a hand-POSTed
-   layout persists and reloads across reboot (via logs).
+1. **UI-mode rework + storage plumbing.** Replace the Default/Focus boolean with `uiMode`
+   (`0/1/2`) in `Config` (§7.1); add `Layout`/`Element` types, `Persisted.layout`, the §6 buffer
+   and stack bumps, `GET`/`POST /layout`, `apply_layout`, boot load. Dispatch the Departures
+   render on `uiMode` (§7.5) with Custom→Default fallback. *Verify:* `uiMode` round-trips via
+   `/config`; a hand-POSTed layout persists and reloads across reboot; the panel switches
+   Default/Focus/Custom by mode (via logs / a manual `/config` POST).
 2. **Firmware renderer + scaling.** `draw_custom_layout` for all element types (§5.4), plus the
    `blit_scaled_text` helper so both fonts (`s`) and integer scale (`k ∈ {1,2,3}`) work. *Verify:*
-   a POSTed layout draws on the panel at any font/scale; empty layout falls back to the built-in
-   board.
+   in Custom mode a POSTed layout draws on the panel at any font/scale; empty layout falls back
+   to the Default board.
 3. **Live-preview endpoints + watchdog.** `POST /preview`, `POST /preview/end`, the transient
-   mirror, and the auto-revert timer (§7.4). *Verify:* a POSTed preview shows on the panel without
-   writing flash; the panel reverts on `/preview/end` and after the timeout.
+   mirror, and the auto-revert timer (§7.4). *Verify:* a POSTed preview shows on the panel
+   regardless of `uiMode` without writing flash; the panel reverts to the persisted mode + layout
+   on `/preview/end` and after the timeout.
 4. **Simulator + thumbnail.** Pixel-accurate JS renderer (fonts, palette, scaling blitter, marquee
    math) driving both the editor canvas and the main-page thumbnail (`GET /layout`). *Verify:* the
    simulator matches the panel glyph-for-glyph for every element type and scale.
-5. **Editor.** Overlay, palette/add, move/resize/delete, properties sheet with colour/font/scale/
-   align controls and nudges, dirty tracking, Save/Cancel/Reset — wired to the live-preview driver
-   (§8.4) so the panel mirrors from open to close. *Verify:* full design → live panel mirroring →
-   save → persisted, and Cancel/abandon reverts.
+5. **Main-page selector + editor.** The three-way mode selector (§8.1) wired to `/config`; the
+   editor overlay, palette/add, move/resize/delete, properties sheet with colour/font/scale/align
+   controls and nudges, dirty tracking, Save (sets Custom) / Cancel / Clear (sets Default) — wired
+   to the live-preview driver (§8.4). *Verify:* switch modes from the main page; full design →
+   live panel mirroring → save → persisted as Custom; Cancel/abandon reverts; Clear returns to
+   Default.
