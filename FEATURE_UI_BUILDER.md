@@ -55,6 +55,9 @@ flashing new firmware."
 - A full-screen, touch-first layout editor reachable from the config page.
 - A **pixel-accurate** 64×64 simulator that mirrors the firmware's fonts, palette, and
   coordinate system.
+- **Live on-panel preview:** the physical panel mirrors the working layout in real time from
+  the moment the editor opens, so the phone simulator and the device stay in lock-step while
+  the user designs.
 - Add / move / resize / delete elements; edit per-element properties; nudge for pixel
   precision; reset to default.
 - A **compact, versioned** layout schema that round-trips phone ⇄ flash ⇄ firmware renderer.
@@ -62,14 +65,14 @@ flashing new firmware."
 
 ### Non-goals (v1)
 - **No history / undo stack across sessions.** One layout stored. (A single in-editor undo
-  step is optional; see §4.5.)
+  step is optional; see §4.6.)
 - **No multiple layouts / profiles / scheduling.** One layout only.
 - **No re-theming the non-departures states** (provisioning, connecting, idle, offline).
 - **No free-form pixel art / per-pixel painting.** Elements only.
 - **No custom fonts or colours** beyond the fixed brand palette and the two firmware fonts
   (plus integer upscaling). See §5.4.
-- **No live on-panel preview while editing** (the simulator is the preview). Listed as a
-  future option in §11.
+- **No multiple concurrent editors.** The live preview is single-owner: one phone drives the
+  panel at a time (§4.3).
 
 ---
 
@@ -123,32 +126,57 @@ Opens as a full-viewport overlay (same overlay/z-index machinery as the settings
 4. **Bottom bar / palette:**
    - When **nothing** is selected: a horizontally-scrollable **element palette** (chips:
      Text, Departures, Clock, Date, Station, Divider, Icon) plus a persistent **"+ Add"**
-     affordance. Tapping a chip adds that element (see §4.3).
-   - When **an element is selected**: a **properties sheet** (see §4.4) with a **Delete**
+     affordance. Tapping a chip adds that element (see §4.4).
+   - When **an element is selected**: a **properties sheet** (see §4.5) with a **Delete**
      button, replacing the palette until deselected.
 
 **Empty state:** canvas shows only the grid with centered hint text "Tap **+** to add your
 first element." (Rendered as page HTML over the canvas, not on the simulated panel.)
 
-**Live vs. sample data:** the simulator should render with **live** data where possible — if
-a stop is already selected on the config page, reuse the page's existing `stationboard` fetch
-(PB §6.2) to show real upcoming departures, the real station name, and the real current time.
-If no stop is selected yet (or the fetch fails), fall back to **representative sample data**
-(`"Zürich, Hauptbahnhof"`, three plausible departures, current clock) so every element type
-previews meaningfully.
+**Live vs. sample data (phone simulator):** the simulator renders with **live** data where
+possible — if a stop is already selected on the config page, reuse the page's existing
+`stationboard` fetch (PB §6.2) to show real upcoming departures, the real station name, and
+the real current time. If no stop is selected yet (or the fetch fails), fall back to
+**representative sample data** (`"Zürich, Hauptbahnhof"`, three plausible departures, current
+clock) so every element type previews meaningfully. The **on-panel** preview (§4.3) always
+uses the device's real runtime data, since it renders through the normal departures pipeline.
 
-### 4.3 Adding elements
+### 4.3 Live on-panel preview
+
+The physical panel mirrors the working layout **in real time**, starting the instant the
+editor opens — the panel is the second, authoritative preview surface alongside the phone
+simulator.
+
+- **On open:** the editor loads the persisted layout (`GET /layout`) into its working copy and
+  immediately pushes it to the device (`POST /preview`, §7.4), so the panel switches to the
+  working layout before the user makes a single edit.
+- **On every edit:** move / resize / add / delete / property change re-pushes the working copy
+  via a **debounced** `POST /preview` (~150–250 ms) so the panel tracks the design without
+  flooding the device with a request per drag-pixel.
+- **Transient, never persisted.** `/preview` updates the device's *live* layout mirror only;
+  nothing is written to flash until **Save** (§4.6). The panel shows the design; a reboot or a
+  timeout (below) reverts to the last saved layout.
+- **Idle keepalive + auto-revert safety.** While the editor is open the page sends a keepalive
+  `POST /preview` (reusing the latest working copy) every ~5 s. The firmware arms an
+  **auto-revert timer** (~15 s) on each preview push; if it expires without a new push — the
+  phone locked, lost WiFi, or the tab was closed — the device reloads the persisted layout and
+  leaves preview mode, so the panel can never get stuck showing an abandoned draft.
+- **On close (Save or Cancel):** the editor ends preview explicitly (`POST /preview/end`,
+  §7.4). After a **Save** the persisted and preview layouts are identical, so the panel is
+  already correct; after a **Cancel** the device reverts to the saved layout.
+
+### 4.4 Adding elements
 
 - Tap a palette chip (or **+ Add** → a small type sheet). The new element is inserted at a
   sensible default position/size for its type (e.g. Text at `(2, 2)` size S; Departures block
   filling the lower panel) and is **auto-selected**, opening its properties sheet.
 - Elements are placed into the layout array in insertion order; draw order = array order
   (later = on top). Overlap is rare at 64×64; a simple "Send to back / Bring to front" pair
-  in the properties sheet is optional (§11).
+  in the properties sheet is optional.
 - Enforce **MAX_ELEMENTS** (see §5.5). When at the cap, the palette chips are disabled with a
   short note ("Max N elements").
 
-### 4.4 Editing an element (move / resize / properties / nudge / delete)
+### 4.5 Editing an element (move / resize / properties / nudge / delete)
 
 - **Move:** drag the element body. Position snaps to the **1-LED grid** and is **clamped**
   so the element stays fully within `0..63` on both axes.
@@ -173,7 +201,7 @@ previews meaningfully.
   palette.
 - **Deselect:** tap empty canvas area.
 
-### 4.5 Save / cancel / dirty tracking
+### 4.6 Save / cancel / dirty tracking
 
 - The editor keeps a working copy of the layout array. Any mutation marks it **dirty** and
   enables **Save**.
@@ -187,7 +215,7 @@ previews meaningfully.
   history and does not contradict the "one layout, no history" storage rule. Ship only if
   cheap; otherwise omit.
 
-### 4.6 Reset to default
+### 4.7 Reset to default
 
 - A **"Reset to default"** action lives in the editor (e.g. an overflow item in the app bar,
   or a footer button under the palette). It clears the custom layout: `POST /layout` with an
@@ -195,7 +223,7 @@ previews meaningfully.
   falls back to the built-in board (PB §7.7). The main-page thumbnail reverts to "Default
   layout".
 
-### 4.7 Relationship to existing display settings (important)
+### 4.8 Relationship to existing display settings (important)
 
 The settings sheet (PB §4.6) has **Hide city names** and **Line badges** toggles that shape
 the built-in board. With a custom layout active, the **departures element owns those choices
@@ -344,22 +372,40 @@ already noted in `storage.rs`).
 - Apply the buffer/size changes from §6.
 
 ### 7.3 `shared.rs`
-- Add a live mirror of the current layout for the render task. Because a `Layout` is larger
-  than an atomic, store it behind a `Mutex<CriticalSectionRawMutex, Option<Layout>>` (like
-  `SELECTION`), **not** the render-task-must-never-block atomics used for config scalars.
-  The render task reads it when drawing the Departures state; acceptable because a departures
-  redraw is already event-driven, not per-DMA-frame.
-- Add `apply_layout(Option<Layout>)` called at boot (from flash) and on `POST /layout`.
+- Add a **live layout mirror** for the render task — the layout the panel currently draws.
+  Because a `Layout` is larger than an atomic, store it behind a `Mutex<CriticalSectionRawMutex,
+  Option<Layout>>` (like `SELECTION`), **not** the render-task-must-never-block atomics used for
+  config scalars. The render task reads it when drawing the Departures state; acceptable because
+  a departures redraw is already event-driven, not per-DMA-frame.
+- `apply_layout(Option<Layout>)` sets the live mirror and signals a redraw. Called at boot
+  (from flash), on `POST /layout` (persisted), and on `POST /preview` (transient).
+- **Preview state** for the live on-panel preview (§4.3): a flag that the mirror currently
+  holds a *transient* (unsaved) layout, plus a preview **deadline** (`AtomicI64`/`AtomicU32`
+  holding an `Instant`-derived expiry). Set on each preview push; cleared when preview ends or
+  is committed. A lightweight watchdog (see §7.4) reverts the mirror to the persisted layout
+  when the deadline passes.
 
 ### 7.4 `httpd.rs` — new endpoints
-- `GET /layout` → current layout JSON (or `{"v":1,"e":[]}` / `204` when none). Built from the
-  live mirror; use an `OwnedJson<N>`-style response (N sized to the layout budget).
+- `GET /layout` → current **persisted** layout JSON (or `{"v":1,"e":[]}` / `204` when none),
+  read from flash / the persisted copy. Used by the editor to seed its working copy and by the
+  main-page thumbnail. Use an `OwnedJson<N>`-style response (N sized to the layout budget).
 - `POST /layout` (`Json<Layout>`) → validate/clamp (§5.5), persist via `save_layout`, update
-  the live mirror via `apply_layout`, and `SELECTION_CHANGED.signal(())` to force an immediate
-  redraw (same wake used by `/save` and `/config`). Respond `{"ok":true}`.
-- **Reset:** either a `DELETE /layout` or a `POST /layout` with empty `e` clears it. Prefer
-  reusing `POST /layout` with empty `e` to keep the route table minimal.
-- Register the routes in `config_server_task`'s `Router`.
+  the live mirror via `apply_layout`, clear any preview state, and `SELECTION_CHANGED.signal(())`
+  to force an immediate redraw (same wake used by `/save` and `/config`). Respond `{"ok":true}`.
+- `POST /preview` (`Json<Layout>`) → **transient** live preview (§4.3). Validate/clamp, push to
+  the live mirror via `apply_layout` **without** touching flash, mark preview active, and (re)arm
+  the auto-revert deadline (~15 s). Signals a redraw. Respond `{"ok":true}`. This is the
+  high-frequency endpoint (debounced edits + ~5 s keepalive), so it must not write flash.
+- `POST /preview/end` → discard the transient preview: reload the **persisted** layout and
+  `apply_layout` it, clear preview state. Called on editor Cancel (and harmlessly after Save).
+- **Auto-revert watchdog:** while preview is active, a timer (a small dedicated task, or folded
+  into the existing render/poll timing) checks the deadline; on expiry it behaves exactly like
+  `POST /preview/end` so an abandoned session (phone locked / WiFi dropped / tab closed) cannot
+  leave the panel stuck on an unsaved draft.
+- **Reset:** a `POST /layout` with empty `e` clears the saved layout (kept as one route rather
+  than a separate `DELETE`, to keep the table minimal).
+- Register all routes in `config_server_task`'s `Router`. The `/preview` body is the same size
+  as `/layout`, so the §6 HTTP-buffer sizing already covers it.
 
 ### 7.5 `display.rs` — the renderer (the core work)
 - The Departures branch of `draw_state` gains a fork:
@@ -411,11 +457,10 @@ self-contained page.
   same fonts, palette, coordinate system, and layout math as the firmware**. To be truly
   WYSIWYG:
   - **Fonts:** port the two ISO-8859-1 mono fonts (5×7, 6×10) into the page as compact glyph
-    bitmaps (a small base64 atlas or a JS byte table) and blit them per-pixel — this
-    guarantees the preview matches the panel glyph-for-glyph. (Pragmatic MVP fallback:
-    approximate with a monospaced canvas font sized to the LED cell and overlay the grid;
-    accept minor mismatch. The accurate route is strongly preferred and is a bounded, one-time
-    cost.)
+    bitmaps (a small base64 atlas or a JS byte table) and blit them per-pixel, with the same
+    `k×k` integer upscaling as the firmware. This guarantees the preview matches the panel
+    glyph-for-glyph — essential now that the physical panel mirrors the design live (§4.3), so
+    any mismatch between simulator and panel would be visible side by side.
   - **Palette:** reuse the exact copper/amber/dim RGB values from `display.rs` (`ACCENT`,
     `AMBER`, `DIM`) rather than approximations.
   - **Marquee/clip/badge math:** mirror `draw_marquee`, `draw_marquee_clipped`, `draw_badge`
@@ -430,10 +475,19 @@ self-contained page.
   (resize) with 1-LED snapping and clamping.
 - Enforce all §5.5 bounds client-side (belt-and-suspenders with the firmware).
 
-### 8.4 Networking
-- `GET /layout` on editor open and on page load (for the thumbnail); `POST /layout` on save;
-  reset = `POST /layout` with empty `e`. Reuse the optimistic status pattern and 8 s abort
-  timeout already used by `/save`.
+### 8.4 Networking & live-preview driver
+- `GET /layout` on page load (thumbnail) and on editor open (seed the working copy).
+- **Live on-panel preview (§4.3):** on editor open, immediately `POST /preview` with the
+  working copy; on every edit, `POST /preview` **debounced** ~150–250 ms; while idle in the
+  editor, a **keepalive** `POST /preview` every ~5 s to hold the panel in preview and reset the
+  firmware auto-revert timer. Preview posts are fire-and-forget (a dropped one is corrected by
+  the next edit or keepalive) and must not block the UI — coalesce so only the latest working
+  copy is in flight.
+- **Save:** `POST /layout` (persist), then `POST /preview/end`; update the thumbnail and close.
+- **Cancel:** `POST /preview/end` (panel reverts to the saved layout), then close.
+- **Reset:** `POST /layout` with empty `e`.
+- Reuse the optimistic status pattern and 8 s abort timeout already used by `/save` for the
+  Save / Reset calls; keepalive/preview calls use a short timeout and no user-facing error.
 
 ---
 
@@ -448,35 +502,34 @@ self-contained page.
 - **BOOT-button reset (PB §7.9):** clears the layout along with everything else.
 - **Flash write fails:** same failure surface as `/save` today — the layout applies live this
   session but a log error notes it won't survive reboot; the page shows the error.
-- **Overlapping elements:** allowed; draw order = array order; last wins. Optional z-controls
-  in §11.
+- **Overlapping elements:** allowed; draw order = array order; last wins. Optional z-controls.
 - **Phone scroll vs. drag:** `touch-action:none` on the canvas; page scroll disabled while a
   drag is in progress.
+- **Editor abandoned mid-preview** (phone locks, WiFi drops, tab closed without Cancel): the
+  firmware auto-revert watchdog (§7.4) restores the saved layout after ~15 s, so the panel
+  never stays stuck on an unsaved draft.
+- **Preview races the poll task:** a `POST /preview` only swaps the layout mirror; the live
+  departures data still comes from the normal poll pipeline, so the panel shows the working
+  layout with real data and never fabricates departures.
 
-## 10. Suggested phasing / milestones
+## 10. Build sequence
+
+A suggested order that keeps each step independently verifiable. All of it is v1.
 
 1. **Schema + storage plumbing.** `Layout`/`Element` types, `Persisted.layout`, the §6 buffer
-   bumps, `GET`/`POST /layout`, `apply_layout`, boot load. Firmware renders built-in still.
-   *Exit:* a hand-POSTed layout persists and reloads across reboot (verified via logs).
-2. **Firmware renderer + scaling.** `draw_custom_layout` for Text, Departures, Divider,
-   Station, plus the `blit_scaled_text` helper so both fonts (`s`) and integer scale
-   (`k ∈ {1,2,3}`) work from the start. *Exit:* a POSTed layout draws on the panel at any
-   font/scale; reset restores built-in.
-3. **Simulator + read-only preview.** Pixel-accurate JS renderer (including the identical
-   scaling blitter) + main-page thumbnail from `GET /layout`. *Exit:* thumbnail matches panel
-   for step-2 element types at every scale.
-4. **Editor MVP.** Overlay, add/move/delete, properties sheet with font-size + scale controls
-   and nudges, Save/Cancel/Reset. *Exit:* end-to-end design → save → panel updates live.
-5. **Polish & extras.** Clock/Date/Icon elements, resize handles, optional in-editor undo,
-   live-data preview from the page's stationboard fetch.
-
-## 11. Open questions / future
-
-- **Live on-panel preview while editing** (stream the working layout to the device for a real
-  WYSIWYG-on-glass loop). Deferred; the simulator is the v1 preview.
-- **Z-order controls** (bring-to-front / send-to-back) — only if overlap proves common.
-- **Multiple layouts / day-night or weekday layouts** — explicitly out of scope now (the
-  "one layout, no history" rule), but the versioned schema leaves room.
-- **Additional element types** — progress bar to next departure, weather (needs a data
-  source), platform number — all additive under the `t` tag + `v` versioning.
-```
+   and stack bumps, `GET`/`POST /layout`, `apply_layout`, boot load. *Verify:* a hand-POSTed
+   layout persists and reloads across reboot (via logs).
+2. **Firmware renderer + scaling.** `draw_custom_layout` for all element types (§5.4), plus the
+   `blit_scaled_text` helper so both fonts (`s`) and integer scale (`k ∈ {1,2,3}`) work. *Verify:*
+   a POSTed layout draws on the panel at any font/scale; empty layout falls back to the built-in
+   board.
+3. **Live-preview endpoints + watchdog.** `POST /preview`, `POST /preview/end`, the transient
+   mirror, and the auto-revert timer (§7.4). *Verify:* a POSTed preview shows on the panel without
+   writing flash; the panel reverts on `/preview/end` and after the timeout.
+4. **Simulator + thumbnail.** Pixel-accurate JS renderer (fonts, palette, scaling blitter, marquee
+   math) driving both the editor canvas and the main-page thumbnail (`GET /layout`). *Verify:* the
+   simulator matches the panel glyph-for-glyph for every element type and scale.
+5. **Editor.** Overlay, palette/add, move/resize/delete, properties sheet with colour/font/scale/
+   align controls and nudges, dirty tracking, Save/Cancel/Reset — wired to the live-preview driver
+   (§8.4) so the panel mirrors from open to close. *Verify:* full design → live panel mirroring →
+   save → persisted, and Cancel/abandon reverts.
