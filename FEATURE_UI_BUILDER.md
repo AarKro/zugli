@@ -263,12 +263,14 @@ All elements share `t` (type), `x`, `y`. Other fields are type-specific and defa
 Notes:
 - `v` (Text literal): bounded `String<N>` on the firmware side (see §5.5). Watch the
   unescape budget in §6.
-- **Scaling (`k`) & fonts:** embedded-graphics mono fonts are fixed-size; there is no native
-  scale. v1 supports the two real fonts (`s`) natively; **integer upscaling (`k`=2,3)** is
-  implemented with a small **glyph pixel-doubling blitter** in the firmware (read the mono
-  font's per-glyph bitmap and draw each source pixel as a `k×k` block). To bound scope, an
-  acceptable v1 cut is: **`s` only, `k` fixed at 1**, with `k` added in a fast follow. The
-  simulator must implement whatever the firmware supports so WYSIWYG holds.
+- **Scaling (`k`) & fonts (v1 requirement):** embedded-graphics mono fonts are fixed-size;
+  there is no native scale. v1 supports **both** the two real fonts (`s` = S/M) **and**
+  **integer upscaling `k ∈ {1,2,3}`**. Upscaling is implemented with a small **glyph pixel-
+  doubling blitter** in the firmware: read the chosen mono font's per-glyph bitmap and draw
+  each source pixel as a `k×k` block (so `M` at `k=2` yields a 12×20 glyph). Text metrics used
+  for layout/marquee/clip math scale accordingly (advance = `char_w × k`, height = `font_h ×
+  k`). The simulator implements the **identical** blitter so WYSIWYG holds glyph-for-glyph.
+  Applies to every text-bearing type (Text, Station, Clock, Date).
 - **Data binding** is implicit in the type: types `1–4` pull from live runtime data at draw
   time (departures, station name, `now_unix`); types `0,5,6` are static.
 
@@ -374,9 +376,10 @@ already noted in `storage.rs`).
   badge via `draw_badge`, destination marquee, time / `draw_train_front`), `rule` (divider),
   and `draw_train_front` / the Z-blind / `arrow` glyphs (icon). Colours resolve through the
   palette map and the existing `scaled()` brightness choke point.
-- **Font scaling (`k`)**: implement a `blit_scaled_text` helper that pixel-doubles a mono
-  font glyph, or defer `k` to a follow-up (see §5.4). All drawing stays behind the "one
-  isolated function" rule from PB §7.7.
+- **Font scaling (`k`, v1):** implement a `blit_scaled_text` helper that reads a mono font
+  glyph bitmap and draws each source pixel as a `k×k` block, with matching scaled metrics for
+  the marquee/clip helpers. All text-bearing types route through it. All drawing stays behind
+  the "one isolated function" rule from PB §7.7.
 - **Animation:** an element mid-marquee makes the frame "animating"; OR the per-element
   scrolling flags and return `true` so the render loop keeps ticking (same contract as
   `draw_departures`). The clock/date do not themselves force animation; they refresh on the
@@ -455,21 +458,22 @@ self-contained page.
 1. **Schema + storage plumbing.** `Layout`/`Element` types, `Persisted.layout`, the §6 buffer
    bumps, `GET`/`POST /layout`, `apply_layout`, boot load. Firmware renders built-in still.
    *Exit:* a hand-POSTed layout persists and reloads across reboot (verified via logs).
-2. **Firmware renderer.** `draw_custom_layout` for Text, Departures, Divider, Station (font
-   `s` only, `k`=1). *Exit:* a POSTed layout draws on the panel; reset restores built-in.
-3. **Simulator + read-only preview.** Pixel-accurate JS renderer + main-page thumbnail from
-   `GET /layout`. *Exit:* thumbnail matches panel for step-2 element types.
-4. **Editor MVP.** Overlay, add/move/delete, properties sheet with nudges, Save/Cancel/Reset.
-   *Exit:* end-to-end design → save → panel updates live.
-5. **Polish & extras.** Clock/Date/Icon elements, integer scaling `k` + blitter (firmware +
-   simulator), resize handles, optional in-editor undo, live-data preview from the page's
-   stationboard fetch.
+2. **Firmware renderer + scaling.** `draw_custom_layout` for Text, Departures, Divider,
+   Station, plus the `blit_scaled_text` helper so both fonts (`s`) and integer scale
+   (`k ∈ {1,2,3}`) work from the start. *Exit:* a POSTed layout draws on the panel at any
+   font/scale; reset restores built-in.
+3. **Simulator + read-only preview.** Pixel-accurate JS renderer (including the identical
+   scaling blitter) + main-page thumbnail from `GET /layout`. *Exit:* thumbnail matches panel
+   for step-2 element types at every scale.
+4. **Editor MVP.** Overlay, add/move/delete, properties sheet with font-size + scale controls
+   and nudges, Save/Cancel/Reset. *Exit:* end-to-end design → save → panel updates live.
+5. **Polish & extras.** Clock/Date/Icon elements, resize handles, optional in-editor undo,
+   live-data preview from the page's stationboard fetch.
 
 ## 11. Open questions / future
 
 - **Live on-panel preview while editing** (stream the working layout to the device for a real
   WYSIWYG-on-glass loop). Deferred; the simulator is the v1 preview.
-- **Integer scaling `k`** — ship in v1 or fast-follow? (Bounded by the blitter effort, §5.4.)
 - **Z-order controls** (bring-to-front / send-to-back) — only if overlap proves common.
 - **Multiple layouts / day-night or weekday layouts** — explicitly out of scope now (the
   "one layout, no history" rule), but the versioned schema leaves room.
