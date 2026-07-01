@@ -217,11 +217,26 @@ simulator.
   nudge buttons move by exactly 1 LED and are the accessible, pixel-perfect path. This is a
   first-class control, not an afterthought.
 - **Properties sheet** (bottom sheet, per selected element): shows only the props relevant to
-  the element's type (§5.4). Common controls: **colour swatches** (fixed palette — amber /
-  copper / dim), **alignment** (left/center/right), **font size** (S/M/L), plus the
-  x/y/w/h + nudges. Type-specific controls: Text → text input; Departures → row count,
-  show-badge / show-destination / show-time toggles, hide-city toggle; Clock/Date → format;
-  Icon → which glyph.
+  the element's type (§5.4). Common controls: **colour** (see below), **alignment**
+  (left/center/right), **font size** (S/M/L), plus the x/y/w/h + nudges. Type-specific
+  controls: Text → text input; Departures → row count / row height (its badges and
+  city-stripping follow the global **Line badges** / **Hide city names** settings — no
+  per-element toggles); Station → nothing extra (city-stripping is global); Clock/Date →
+  format; Icon → which glyph.
+- **Colour control (presets + custom picker):** a row of tappable swatches — the three brand
+  presets (**amber / copper / dim**, the good defaults) followed by a **Custom** swatch. The
+  Custom swatch is a thin wrapper over a **native `<input type="color">`** (the OS colour
+  wheel/eyedropper — exactly what "native picker" means on a phone); tapping it opens the OS
+  picker. Behaviour:
+  - Picking a **preset** sets the element's `c` and **clears** any `col`.
+  - Picking a **custom** colour sets `col` (`0xRRGGBB` from the `<input>`'s hex value) which
+    overrides `c`; the Custom swatch then shows that colour and reads as selected.
+  - The active swatch reflects the element's current colour on open (a preset highlighted, or
+    the Custom swatch showing `col`).
+  - Every colour change flows through the same live preview + dirty tracking as any other edit,
+    so the panel (§4.3) and the simulator update as the user drags the picker.
+  - The Departures block (`t=1`) shows only presets — it keeps the board's two-tone scheme
+    (§5.4), so no Custom swatch there.
 - **Delete:** a **trash** button in the properties sheet (with an inline confirm on a phone —
   a second tap or a small confirm chip). Deselecting (tap empty canvas) returns to the
   palette.
@@ -255,15 +270,17 @@ simulator.
 ### 4.8 Relationship to existing display settings (important)
 
 The settings sheet (PB §4.6) has **Hide city names** and **Line badges** toggles that shape
-the built-in board. With **Custom** mode active, the **departures element owns those choices
-per-element** (its own `stripCity` / `showBadge` props). Decision:
+the built-in board. These are **global** and apply in **every** UI mode — Default, Focus, and
+Custom alike. The custom layout's data-bound elements (Departures, Station) deliberately carry
+**no** per-element overrides for them (§5.4); they read the same global config through the same
+`city()` / `line_badges_enabled()` paths as the built-in board.
 
-- When the UI mode is **Custom**, the global *Hide city names* and *Line badges* toggles apply
-  **only to the Default board** (and Focus, where relevant), not to the custom layout. To
-  avoid confusion, show a one-line note in the settings sheet when the mode is Custom: *"Custom
-  layout is active — these apply to the Default view."*
-- **Brightness / auto-dim** are global and **always apply** (they scale the whole palette at
-  the render choke point — PB §7.7 / `display::scaled`), in every mode.
+- **Hide city names / Line badges:** one setting, one behaviour, everywhere. Toggling them in
+  the settings sheet immediately reshapes the Default board, the Focus view, **and** any
+  Departures/Station elements in a custom layout. No special-casing, no "applies only to…"
+  caveat, no confusing dual controls.
+- **Brightness / auto-dim** are likewise global and **always apply** (they scale the whole
+  palette at the render choke point — PB §7.7 / `display::scaled`), in every mode.
 
 ---
 
@@ -281,9 +298,15 @@ per-element** (its own `stripCity` / `showBadge` props). Decision:
 ### 5.2 Coordinate system, palette, fonts
 - **Origin** top-left `(0,0)`; x→right, y→down; valid range `0..=63`. `y` is the **baseline-
   top** for text (matches `display::left` using `Baseline::Top`).
-- **Palette** (indices map to existing `display.rs` constants, scaled by brightness at draw):
-  `0 = AMBER`, `1 = ACCENT` (copper), `2 = DIM`. (`OFF` is only for badge cut-outs, not a
-  user colour.)
+- **Colour** — a preset **or** a custom RGB:
+  - **Preset** `c` (indices map to existing `display.rs` constants, scaled by brightness at
+    draw): `0 = AMBER`, `1 = ACCENT` (copper), `2 = DIM`. (`OFF` is only for badge cut-outs,
+    not a user colour.) `c` defaults to `0`.
+  - **Custom** `col` — an optional 24-bit RGB value `0xRRGGBB` (see §5.4). When present it
+    **overrides** `c`; when absent the preset `c` is used. Chosen via the native colour picker
+    (§4.5). Still passes through the brightness `scaled()` choke point at draw, so it dims with
+    the rest of the panel. Note the HUB75 gamut caveat in §9 (bright/high-blue customs wash
+    toward white on the physical panel).
 - **Fonts:** the two ISO-8859-1 mono fonts already used: `S = FONT_5X7` (5×7, advance 5),
   `M = FONT_6X10` (6×10, advance 6). See §5.4 for scaling beyond M.
 
@@ -294,10 +317,13 @@ Compact keys to fit flash. Example:
 ```json
 { "v": 1, "e": [
   { "t": 3, "x": 1, "y": 0,  "w": 62, "s": 1, "c": 0, "a": 0 },
-  { "t": 1, "x": 0, "y": 11, "w": 64, "h": 52, "n": 3, "c": 0, "sc": 1, "sd": 1, "st": 1, "hc": 0 },
-  { "t": 4, "x": 44, "y": 0, "s": 1, "c": 1, "a": 2 }
+  { "t": 1, "x": 0, "y": 11, "w": 64, "h": 52, "n": 3 },
+  { "t": 4, "x": 44, "y": 0, "s": 1, "col": 5296264, "a": 2 }
 ] }
 ```
+
+(`col` is the optional custom colour: `5296264 = 0x50D888`, a green not in the preset palette;
+omit it to fall back to the preset `c`.)
 
 - `v` — schema version (`u8`), currently `1`.
 - `e` — array of elements, max `MAX_ELEMENTS` (§5.5). An **empty `e`** means "no custom
@@ -310,14 +336,27 @@ All elements share `t` (type), `x`, `y`. Other fields are type-specific and defa
 | `t` | Type | Fields (beyond t,x,y) | Renders as (firmware primitive) |
 |---|---|---|---|
 | `0` | **Text** (static) | `w` (clip/marquee width), `s` (font 0=S,1=M), `k` (scale 1–3), `c` (colour), `a` (align 0=L/1=C/2=R), `v` (literal string) | `draw_marquee` / `left` / `centered` |
-| `1` | **Departures** (live block) | `w`, `h`, `n` (rows 1–4), `rh` (row height, default 17), `sc` (show badge), `sd` (show destination), `st` (show time), `hc` (hide-city) | parameterized `draw_departures` |
-| `2` | **Station name** (live) | `w`, `s`, `k`, `c`, `a`, `hc` (hide-city) | `draw_marquee` bound to station |
+| `1` | **Departures** (live block) | `w`, `h`, `n` (rows 1–4), `rh` (row height, default 17) — **no content toggles**; badges + city-stripping follow global config | parameterized `draw_departures` |
+| `2` | **Station name** (live) | `w`, `s`, `k`, `c`, `a` — city-stripping follows global config | `draw_marquee` bound to station |
 | `3` | **Clock** (live) | `s`, `k`, `c`, `a`, `f` (format 0=`HH:MM`,1=`H:MM`, …) | `left`/`centered` of formatted time |
 | `4` | **Date** (live) | `s`, `k`, `c`, `a`, `f` (format) | as Clock |
 | `5` | **Divider** (rule) | `w` (length), `th` (thickness 1–2), `c` | `rule` / `Line` |
 | `6` | **Icon** | `k` (scale 1–3), `c`, `g` (glyph id: 0=tram-front,1=Z-blind,2=arrow) | `draw_train_front` / glyph blitter |
 
 Notes:
+- **Config-driven behaviour — no per-element overrides.** The data-bound elements render
+  exactly like the built-in board: the **Departures** block and **Station name** honour the
+  **global config** (`stripCity` "Hide city names", `showLineBadges` "Line badges") at draw
+  time via the existing `city()` / `line_badges_enabled()` paths. There are deliberately **no**
+  per-element toggles that duplicate a config option (no `hc` / `sc` / `sd` / `st`); placing an
+  element only decides *where/how big* it is, not a divergent content behaviour. This keeps a
+  single source of truth for those settings and matches how Default/Focus already behave.
+- **Colour (`c` + optional `col`):** every element that has a `c` slot may instead carry an
+  optional **`col`** (24-bit RGB `0xRRGGBB`, stored as a `u32`) that overrides the preset `c`.
+  Absent `col` → use the preset. This applies to the single-colour elements (Text, Station,
+  Clock, Date, Divider, Icon). The **Departures block keeps its two-tone board scheme**
+  (amber text / copper time / badge, exactly as the built-in board) and takes **neither `c`
+  nor `col`** — recolouring the board is out of scope.
 - `v` (Text literal): bounded `String<N>` on the firmware side (see §5.5). Watch the
   unescape budget in §6.
 - **Scaling (`k`) & fonts (v1 requirement):** embedded-graphics mono fonts are fixed-size;
@@ -340,6 +379,9 @@ Notes:
   buffer, §6). The `LAYOUT_MAX_BYTES` cap still governs the total.
 - Numeric ranges clamped: `x,y,w,h ∈ 0..=64`, `n ∈ 1..=4`, `k ∈ 1..=3`, `c ∈ 0..=2`,
   `a ∈ 0..=2`, indices within their enums.
+- `col` (optional custom colour) — a `u32` masked to 24 bits (`col & 0xFFFFFF`); any value is
+  otherwise valid. When present it overrides `c`. On the Departures block (`t=1`) `col` is
+  ignored (§5.4).
 - The firmware must **defensively clamp/skip** any out-of-range value rather than trust the
   payload (a hand-crafted POST must never panic the render task). Elements fully off-panel are
   skipped; partially off-panel are clipped by the existing `pset`/clip helpers.
@@ -416,6 +458,12 @@ already noted in `storage.rs`).
   text). Add `pub const MAX_ELEMENTS: usize = 16;`. Derive `Clone, Debug, Serialize,
   Deserialize`. Use short serde `rename` keys matching §5.
 - Do **not** use a data-carrying Rust enum for elements (serde-json-core limitation, §5.1).
+- **Colour field.** Element carries `c: u8` (preset index, `#[serde(default)]` → 0) and an
+  optional custom colour `col: Option<u32>` (`0xRRGGBB`). Tag `col` with
+  `#[serde(default, skip_serializing_if = "Option::is_none")]` so it only appears in the JSON
+  when a custom colour is set — keeping the common preset case compact for flash. Add an
+  `elem_color` helper (used by the renderer, §7.5) that returns the `col` RGB when present,
+  else the preset for `c`.
 - **UI mode.** Replace the existing boolean Default/Focus toggle in `Config` (the uncommitted
   `focus`-style field) with a three-state **`ui_mode`** (JSON `uiMode`): `0 = Default`,
   `1 = Focus`, `2 = Custom`. Represent it as a `u8` (or a small `#[repr(u8)]` enum that
@@ -510,8 +558,18 @@ already noted in `storage.rs`).
   primitives: `left` / `centered` / `draw_marquee` / `draw_marquee_clipped` (text, station,
   clock, date), a parameterized extraction of `draw_departures`' row logic (Departures block:
   badge via `draw_badge`, destination marquee, time / `draw_train_front`), `rule` (divider),
-  and `draw_train_front` / the Z-blind / `arrow` glyphs (icon). Colours resolve through the
-  palette map and the existing `scaled()` brightness choke point.
+  and `draw_train_front` / the Z-blind / `arrow` glyphs (icon).
+- **Config-driven, not element-driven.** The Departures and Station paths read the **same
+  global config** the built-in board uses — `shared::line_badges_enabled()` for badges vs.
+  plain text and `city()` (`shared::strip_city_enabled()`) for city-stripping — **not** any
+  per-element flag (there are none, §5.4). The parameterized `draw_departures` takes only
+  geometry (origin, width, rows, row height) from the element; all content behaviour comes from
+  config, so it stays in lock-step with the Default board and Focus view.
+- **Colour resolution:** a single `elem_color(el)` helper returns `Color::new(r,g,b)` from
+  `el.col` (unpacking `0xRRGGBB`) when it is present, else the preset `Color` for `el.c`. Its
+  result goes through the existing `scaled()` brightness choke point like every other colour,
+  so custom colours dim with the panel. The Departures block ignores `col` and keeps its
+  amber/copper scheme (§5.4).
 - **Font scaling (`k`, v1):** implement a `blit_scaled_text` helper that reads a mono font
   glyph bitmap and draws each source pixel as a `k×k` block, with matching scaled metrics for
   the marquee/clip helpers. All text-bearing types route through it. All drawing stays behind
@@ -559,7 +617,8 @@ self-contained page.
     glyph-for-glyph — essential now that the physical panel mirrors the design live (§4.3), so
     any mismatch between simulator and panel would be visible side by side.
   - **Palette:** reuse the exact copper/amber/dim RGB values from `display.rs` (`ACCENT`,
-    `AMBER`, `DIM`) rather than approximations.
+    `AMBER`, `DIM`) rather than approximations, and mirror the firmware's `elem_color`
+    resolution — draw `col` (`0xRRGGBB`) when present, else the preset `c`.
   - **Marquee/clip/badge math:** mirror `draw_marquee`, `draw_marquee_clipped`, `draw_badge`
     and the departures-row layout so wrapping, clipping and badge sizing look identical.
 - The simulator is the single source of truth for both the editor canvas and the thumbnail;
@@ -595,6 +654,13 @@ self-contained page.
 ## 9. Edge cases & constraints
 
 - **Malformed / hostile POST:** firmware clamps and skips; never panics (§5.5, §7.5).
+- **Custom colour vs. HUB75 gamut:** a custom `col` shows accurately on the phone (full-RGB
+  screen) but the physical panel skews — the driver comment in `display.rs` notes that colours
+  riding high on blue/green wash toward white, which is why the brand palette is deep and
+  red-weighted. So a bright or blue-heavy custom colour can look paler/whiter on glass than in
+  the simulator. This is inherent to the panel, not a bug; surface a brief note near the
+  custom picker ("Colours may look brighter/washed on the panel") and let the live on-panel
+  preview (§4.3) be the source of truth. No gamut remapping in v1.
 - **Layout references live data that's absent:** Departures/Station render "no service"/empty
   gracefully (as the built-in board already does); Clock/Date before SNTP sync render a
   placeholder (`--:--`) rather than a wrong time (`now_unix()` returns `None` pre-sync).
