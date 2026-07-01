@@ -173,8 +173,11 @@ simulator.
 - Elements are placed into the layout array in insertion order; draw order = array order
   (later = on top). Overlap is rare at 64×64; a simple "Send to back / Bring to front" pair
   in the properties sheet is optional.
-- Enforce **MAX_ELEMENTS** (see §5.5). When at the cap, the palette chips are disabled with a
-  short note ("Max N elements").
+- Enforce the **`LAYOUT_MAX_BYTES`** budget live (see §5.5 / §6): the editor tracks the
+  working layout's serialized size and, once the next element would cross the budget (or
+  `MAX_ELEMENTS` is reached), disables the palette chips with a short "Layout full" note.
+  Because a long accented Text string weighs far more than, say, a Divider, the trigger is the
+  byte budget, not a fixed element count.
 
 ### 4.5 Editing an element (move / resize / properties / nudge / delete)
 
@@ -303,8 +306,12 @@ Notes:
   time (departures, station name, `now_unix`); types `0,5,6` are static.
 
 ### 5.5 Bounds & validation (enforced on **both** phone and firmware)
-- `MAX_ELEMENTS` — recommend **16** (bounds the heapless `Vec` and flash — §6).
-- Text literal `v` — recommend `String<24>` (bounds flash + the storage unescape buffer, §6).
+- **`LAYOUT_MAX_BYTES` — the authoritative flash bound (recommend 1536).** A layout is valid
+  only if its serialized JSON is ≤ this. This — not element count — is what guarantees the
+  record fits the sector; see §6 point 2 for why (accented-text escapes).
+- `MAX_ELEMENTS` — recommend **16**, a secondary sanity limit that bounds the heapless `Vec`.
+- Text literal `v` — recommend `String<24>` (bounds a single field + the storage unescape
+  buffer, §6). The `LAYOUT_MAX_BYTES` cap still governs the total.
 - Numeric ranges clamped: `x,y,w,h ∈ 0..=64`, `n ∈ 1..=4`, `k ∈ 1..=3`, `c ∈ 0..=2`,
   `a ∈ 0..=2`, indices within their enums.
 - The firmware must **defensively clamp/skip** any out-of-range value rather than trust the
@@ -324,17 +331,36 @@ layout }` in `storage.rs`, as a new **`#[serde(default)] layout: Option<Layout>`
 follow the existing read-modify-write pattern (`save_config` is the template).
 
 **This is the highest-risk part of the feature.** Everything lives in **one 4096-byte flash
-sector** and today's code caps the JSON payload at `MAX_PAYLOAD = 1024`. A `Selection` at full
-`MAX_CONNS` is already ~900 B, so a layout will **not** fit in the current 1024 budget. Required
-changes:
+sector** as a single JSON record behind an 8-byte header, so the physical ceiling is
+`4096 − 8 = 4088 B`. The record's current whole-record worst case (WiFi creds + a full
+`MAX_CONNS` selection + config) is **~900 B**, so the sector is only ~22 % used — there is
+plenty of *physical* room. The blocker is instead an **artificial software cap**,
+`MAX_PAYLOAD = 1024`, well below the physical ceiling; a layout won't fit under *that*.
+Required changes:
 
 1. **Bump `MAX_PAYLOAD`** (in `storage.rs`) from `1024` to **~3072**. The whole `Persisted`
-   record must serialize under both `MAX_PAYLOAD` **and** the sector's usable `4096 − 8 = 4088`
-   bytes. Worst-case budget: wifi ~120 + selection ~900 + config ~120 + layout ~1400 ≈ **2540 B**
-   < 3072 < 4088. ✔
-2. **Bound the layout size** so worst-case stays within budget: `MAX_ELEMENTS = 16`, each
-   element's JSON ≤ ~80 B (short keys, small ints, `v ≤ String<24>`). 16 × 80 + framing ≈
-   ~1.3 KB. Keep a safety assertion/test that a full layout serializes under the layout budget.
+   record must serialize under both `MAX_PAYLOAD` **and** the sector's usable 4088 B. With the
+   existing record at ~900 B and the layout capped at ~1.5 KB (point 2), the worst case is
+   **~2.4 KB** — under 3072, and ~1.6 KB below the 4088 physical ceiling. ✔
+
+2. **Cap the layout by TOTAL SERIALIZED BYTES, not by element count.** Define
+   `LAYOUT_MAX_BYTES` (recommend **1536**) and treat it as the authoritative bound; keep
+   `MAX_ELEMENTS = 16` only as a secondary sanity limit. Element count alone does **not**
+   guarantee a fit: a Text element's string is `String<24>`, but accented Swiss characters
+   (`ü`, `ö`, `ä`) serialize as 6-byte `\uXXXX` escapes, so one worst-case Text element is
+   ~200 B and 16 of them would be ~3.2 KB — which, on top of the existing ~900 B, would blow
+   past 4088. Enforce the byte cap in **two** places:
+   - **Editor (live):** the page knows the working layout's serialized size as the user edits,
+     so it disables **+ Add** and shows a "layout full" note *before* Save once the next
+     element would cross `LAYOUT_MAX_BYTES`. This makes the limit visible, never a silent
+     truncation.
+   - **Firmware (backstop):** `POST /layout` (and `POST /preview`) reject a body whose
+     serialized layout exceeds `LAYOUT_MAX_BYTES` with a clear error, before it can be written
+     to flash. Add a test asserting the largest *accepted* layout still serializes under budget.
+
+   In practice, laying out 64×64 leaves no room to place many max-length text boxes, so real
+   layouts land near ~1 KB; the byte cap simply guarantees correctness for the pathological
+   case rather than relying on that.
 3. **Stack:** `write_record` builds `buf: [0u8; 8 + MAX_PAYLOAD + 4]` on the stack (~3 KB at
    the new size) and `read_record` a `[0u8; MAX_PAYLOAD]` scratch. Confirm the network/httpd
    task stack (where `/layout` and `/save` handlers run) has headroom; bump the task stack if
@@ -344,10 +370,11 @@ changes:
    text field of all-accented chars → 144 B > 96. **Bump the unescape buffer to ≥ 256 B**, or
    cap the Text literal length so its escaped form fits. (Station names already flow through
    here; re-verify against the new max field.)
-5. **HTTP buffers (`httpd.rs`):** `POST /layout` bodies can reach ~1.4 KB. Today `http_buf =
-   2048`, `tcp_rx = 1024`. A ~1.4 KB body + request headers can exceed these. **Bump
-   `http_buf` to ~3072 and `tcp_rx` to ~2048**; `tcp_tx = 4096` is fine for the `GET /layout`
-   response. Verify picoserve's buffering handles the largest request end-to-end.
+5. **HTTP buffers (`httpd.rs`):** `POST /layout` and `POST /preview` bodies can reach
+   `LAYOUT_MAX_BYTES` (~1.5 KB) plus request headers. Today `http_buf = 2048`, `tcp_rx = 1024`,
+   so the body alone can exceed `tcp_rx`. **Bump `http_buf` to ~3072 and `tcp_rx` to ~2048**;
+   `tcp_tx = 4096` is fine for the `GET /layout` response. Verify picoserve's buffering handles
+   the largest request end-to-end.
 
 All five must be done together; changing the schema without the buffer/stack bumps will
 produce silent save failures (the exact "polling doesn't start after restart" class of bug
@@ -389,11 +416,14 @@ already noted in `storage.rs`).
 - `GET /layout` → current **persisted** layout JSON (or `{"v":1,"e":[]}` / `204` when none),
   read from flash / the persisted copy. Used by the editor to seed its working copy and by the
   main-page thumbnail. Use an `OwnedJson<N>`-style response (N sized to the layout budget).
-- `POST /layout` (`Json<Layout>`) → validate/clamp (§5.5), persist via `save_layout`, update
-  the live mirror via `apply_layout`, clear any preview state, and `SELECTION_CHANGED.signal(())`
-  to force an immediate redraw (same wake used by `/save` and `/config`). Respond `{"ok":true}`.
-- `POST /preview` (`Json<Layout>`) → **transient** live preview (§4.3). Validate/clamp, push to
-  the live mirror via `apply_layout` **without** touching flash, mark preview active, and (re)arm
+- `POST /layout` (`Json<Layout>`) → validate/clamp (§5.5) and **reject if the serialized layout
+  exceeds `LAYOUT_MAX_BYTES`** (§6 pt. 2) before any flash write; on success persist via
+  `save_layout`, update the live mirror via `apply_layout`, clear any preview state, and
+  `SELECTION_CHANGED.signal(())` to force an immediate redraw (same wake used by `/save` and
+  `/config`). Respond `{"ok":true}` (or an error on over-budget/invalid input).
+- `POST /preview` (`Json<Layout>`) → **transient** live preview (§4.3). Validate/clamp and apply
+  the same `LAYOUT_MAX_BYTES` check, push to the live mirror via `apply_layout` **without**
+  touching flash, mark preview active, and (re)arm
   the auto-revert deadline (~15 s). Signals a redraw. Respond `{"ok":true}`. This is the
   high-frequency endpoint (debounced edits + ~5 s keepalive), so it must not write flash.
 - `POST /preview/end` → discard the transient preview: reload the **persisted** layout and
@@ -498,6 +528,9 @@ self-contained page.
   gracefully (as the built-in board already does); Clock/Date before SNTP sync render a
   placeholder (`--:--`) rather than a wrong time (`now_unix()` returns `None` pre-sync).
 - **Empty layout saved:** treated as reset-to-default (built-in board).
+- **Over-budget layout:** the editor prevents it (disables Add at the byte cap, §4.4); if one
+  still arrives — a crafted POST — the firmware rejects it with an error and does **not** write
+  flash (§6 pt. 2 / §7.4), so a too-large layout can never partially overwrite the record.
 - **Newer schema `v` than firmware:** fall back to built-in (§5.5).
 - **BOOT-button reset (PB §7.9):** clears the layout along with everything else.
 - **Flash write fails:** same failure surface as `/save` today — the layout applies live this
