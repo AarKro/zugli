@@ -11,7 +11,7 @@
 
 Add an on-phone **layout builder** to the Zügli config page. The user gets a simulated
 **64×64 LED panel** on screen and can **add**, **move**, and **resize/scale** elements
-(text, clock, the live departures block, dividers, icons…) to design their own board.
+(text, clock, live departures, dividers, icons…) to design their own board.
 Exactly **one** custom layout is stored at a time (no versioning, no history). The editor
 loads the saved custom layout if present, otherwise starts from an empty canvas.
 
@@ -145,8 +145,9 @@ Opens as a full-viewport overlay (same overlay/z-index machinery as the settings
    small but have an enlarged invisible hit area (≥ 32–44 px) so they're tappable on a phone.
 4. **Bottom bar / palette:**
    - When **nothing** is selected: a horizontally-scrollable **element palette** (chips:
-     Text, Departures, Clock, Date, Station, Divider, Icon) plus a persistent **"+ Add"**
-     affordance. Tapping a chip adds that element (see §4.4).
+     Text, Departure, Clock, Date, Station, Divider, Icon) plus a persistent **"+ Add"**
+     affordance. Tapping a chip adds that element (see §4.4). The **Departure** chip adds a
+     three-field group, not a single element (§4.4).
    - When **an element is selected**: a **properties sheet** (see §4.5) with a **Delete**
      button, replacing the palette until deselected.
 
@@ -191,8 +192,14 @@ simulator.
 ### 4.4 Adding elements
 
 - Tap a palette chip (or **+ Add** → a small type sheet). The new element is inserted at a
-  sensible default position/size for its type (e.g. Text at `(2, 2)` size S; Departures block
-  filling the lower panel) and is **auto-selected**, opening its properties sheet.
+  sensible default position/size for its type (e.g. Text at `(2, 2)` size S) and is
+  **auto-selected**, opening its properties sheet.
+- **Departure (special — adds a three-field group).** The Departure chip inserts **one live
+  departure** as **three field elements** laid out as a connected row — **badge · direction ·
+  time** — bound to the next free departure slot (§4.5, §5.4). Up to **three** departures
+  (slots 1–3, soonest-first) can exist; the chip disables once three are placed. Each add
+  drops the trio in a default row (mirroring the built-in board's row) and auto-selects the
+  badge field.
 - Elements are placed into the layout array in insertion order; draw order = array order
   (later = on top). Overlap is rare at 64×64; a simple "Send to back / Bring to front" pair
   in the properties sheet is optional.
@@ -209,7 +216,9 @@ simulator.
 - **Resize / scale / extend:** drag a corner handle. Semantics are per type (§5.4):
   - Text/Clock/Date/Station: resizing steps the **font size** (S → M → L…) and, horizontally,
     the **clip/marquee width**.
-  - Departures block: resizing changes **width** and **row count / row height**.
+  - Departure fields: each field (badge / direction / time) is scaled **individually** — its
+    own font size + integer scale (`k`), and the direction field's marquee width. Connected or
+    split, scaling one field never resizes the others.
   - Divider: horizontal drag changes **length**; vertical is fixed (1–2 px thickness prop).
   - Icon: resizing steps the integer **scale** (1×/2×/3×).
 - **Nudge (critical for phones):** the properties sheet exposes **± arrow buttons** and
@@ -218,11 +227,17 @@ simulator.
   first-class control, not an afterthought.
 - **Properties sheet** (bottom sheet, per selected element): shows only the props relevant to
   the element's type (§5.4). Common controls: **colour** (see below), **alignment**
-  (left/center/right), **font size** (S/M/L), plus the x/y/w/h + nudges. Type-specific
-  controls: Text → text input; Departures → row count / row height (its badges and
-  city-stripping follow the global **Line badges** / **Hide city names** settings — no
-  per-element toggles); Station → nothing extra (city-stripping is global); Clock/Date →
-  format; Icon → which glyph.
+  (left/center/right), **font size** (S/M/L) + **scale** (`k`), plus the x/y/w/h + nudges.
+  Type-specific controls: Text → text input; Departure field → the "Departure N · Field" label
+  + Split action (§4.5.1); Station → nothing extra (city-stripping is global); Clock/Date →
+  format; Icon → which glyph. Badges and city-stripping still follow the global **Line badges**
+  / **Hide city names** settings — no per-element toggles (§5.4).
+- **Selection indicator (all elements).** The currently-selected element is always clearly
+  marked — a highlighted bounding box / outline glow — so it is unambiguous **which element's
+  properties sheet is open**. The sheet header names the element (e.g. "Text", "Clock", or
+  "Departure 1 · Badge"). For a connected Departure group, the whole trio shows a subtle group
+  outline while the **selected field within it is emphasized** (stronger outline), so the user
+  sees both the grouping and the active field at once.
 - **Colour control (presets + custom picker):** a row of tappable swatches — the three brand
   presets (**amber / copper / dim**, the good defaults) followed by a **Custom** swatch. The
   Custom swatch is a thin wrapper over a **native `<input type="color">`** (the OS colour
@@ -235,12 +250,42 @@ simulator.
     the Custom swatch showing `col`).
   - Every colour change flows through the same live preview + dirty tracking as any other edit,
     so the panel (§4.3) and the simulator update as the user drags the picker.
-  - The Departures block (`t=1`) shows only presets — it keeps the board's two-tone scheme
-    (§5.4), so no Custom swatch there.
+  - **Departure fields each have their own colour** (badge / direction / time), connected or
+    split — defaulting to the board scheme (badge & direction amber, time copper) and freely
+    recolourable via preset or custom picker.
 - **Delete:** a **trash** button in the properties sheet (with an inline confirm on a phone —
-  a second tap or a small confirm chip). Deselecting (tap empty canvas) returns to the
-  palette.
+  a second tap or a small confirm chip). For a **connected** Departure the trash removes the
+  whole departure (all three fields, with confirm); once **split**, each field deletes on its
+  own. Deselecting (tap empty canvas) returns to the palette.
 - **Deselect:** tap empty canvas area.
+
+### 4.5.1 The Departure element (group of three fields)
+
+Adding a Departure (§4.4) creates **one live departure** rendered as **three field elements** —
+**Badge** (line), **Direction** (destination), **Time** (minutes) — all bound to the same
+departure slot (soonest-first: Departure 1, 2, or 3). Up to three Departures may exist.
+
+- **Data binding is permanent ("always connected in the background").** The three fields always
+  belong to their departure slot; the properties sheet header states which — **"Departure 1"**,
+  **"Departure 2"**, **"Departure 3"** — so the user sees the invisible link. Splitting (below)
+  only affects *layout grouping*, never the data binding.
+- **Separate sheets even while connected.** Each field is individually selectable and has its
+  own properties sheet — its own colour, font size + scale, alignment, and position. The
+  selection indicator (§4.5) makes clear which field is active.
+- **Connected (default): move together.** While connected, dragging any field moves the whole
+  trio as a row; the group shows a shared outline. (Per-field colour/scale still apply
+  individually.)
+- **Split: independent forever.** Splitting a Departure — via a **Split** action in the
+  properties sheet **or by double-tapping** the group — detaches the three fields so each moves
+  and positions independently. This is **one-way**: split fields **cannot be re-connected**; to
+  get a connected trio back, delete these and **re-add** a Departure. After splitting, the sheet
+  drops the Split action.
+- **Rendering follows global config** (badge vs. plain text per **Line badges**; destination
+  city-stripping per **Hide city names**) exactly like the built-in board — no per-field content
+  toggles (§5.4). Fields only carry geometry, colour, and scale.
+- **Missing live departure:** if fewer departures are currently live than a placed slot (e.g.
+  only two departures but Departure 3 is on the layout), that slot's fields draw nothing until a
+  matching departure exists (§9).
 
 ### 4.6 Save / cancel / dirty tracking
 
@@ -316,14 +361,18 @@ Compact keys to fit flash. Example:
 
 ```json
 { "v": 1, "e": [
-  { "t": 3, "x": 1, "y": 0,  "w": 62, "s": 1, "c": 0, "a": 0 },
-  { "t": 1, "x": 0, "y": 11, "w": 64, "h": 52, "n": 3 },
-  { "t": 4, "x": 44, "y": 0, "s": 1, "col": 5296264, "a": 2 }
+  { "t": 3, "x": 1,  "y": 0,  "w": 62, "s": 1, "c": 0, "a": 0 },
+  { "t": 1, "x": 1,  "y": 12, "di": 0, "fk": 0, "s": 1, "c": 0 },
+  { "t": 1, "x": 16, "y": 12, "di": 0, "fk": 1, "w": 33, "s": 0, "c": 0 },
+  { "t": 1, "x": 52, "y": 12, "di": 0, "fk": 2, "s": 0, "c": 1, "a": 2 },
+  { "t": 4, "x": 44, "y": 0,  "s": 1, "col": 5296264, "a": 2 }
 ] }
 ```
 
-(`col` is the optional custom colour: `5296264 = 0x50D888`, a green not in the preset palette;
-omit it to fall back to the preset `c`.)
+The three `t:1` entries are **one Departure** (slot `di:0`) — its Badge (`fk:0`), Direction
+(`fk:1`) and Time (`fk:2`) fields, connected (no `sp`). Splitting sets `sp:1` on all three.
+(`col` on the date is the optional custom colour: `5296264 = 0x50D888`, a green not in the
+preset palette; omit it to fall back to the preset `c`.)
 
 - `v` — schema version (`u8`), currently `1`.
 - `e` — array of elements, max `MAX_ELEMENTS` (§5.5). An **empty `e`** means "no custom
@@ -336,7 +385,7 @@ All elements share `t` (type), `x`, `y`. Other fields are type-specific and defa
 | `t` | Type | Fields (beyond t,x,y) | Renders as (firmware primitive) |
 |---|---|---|---|
 | `0` | **Text** (static) | `w` (clip/marquee width), `s` (font 0=S,1=M), `k` (scale 1–3), `c` (colour), `a` (align 0=L/1=C/2=R), `v` (literal string) | `draw_marquee` / `left` / `centered` |
-| `1` | **Departures** (live block) | `w`, `h`, `n` (rows 1–4), `rh` (row height, default 17) — **no content toggles**; badges + city-stripping follow global config | parameterized `draw_departures` |
+| `1` | **Departure field** (live) | `di` (departure slot 0–2), `fk` (field 0=badge,1=direction,2=time), `w` (direction marquee width), `s`, `k`, `c`/`col`, `a`, `sp` (split: 0=connected,1=split) | `draw_badge` / `draw_marquee` / minutes + `draw_train_front` |
 | `2` | **Station name** (live) | `w`, `s`, `k`, `c`, `a` — city-stripping follows global config | `draw_marquee` bound to station |
 | `3` | **Clock** (live) | `s`, `k`, `c`, `a`, `f` (format 0=`HH:MM`,1=`H:MM`, …) | `left`/`centered` of formatted time |
 | `4` | **Date** (live) | `s`, `k`, `c`, `a`, `f` (format) | as Clock |
@@ -344,19 +393,27 @@ All elements share `t` (type), `x`, `y`. Other fields are type-specific and defa
 | `6` | **Icon** | `k` (scale 1–3), `c`, `g` (glyph id: 0=tram-front,1=Z-blind,2=arrow) | `draw_train_front` / glyph blitter |
 
 Notes:
-- **Config-driven behaviour — no per-element overrides.** The data-bound elements render
-  exactly like the built-in board: the **Departures** block and **Station name** honour the
-  **global config** (`stripCity` "Hide city names", `showLineBadges` "Line badges") at draw
-  time via the existing `city()` / `line_badges_enabled()` paths. There are deliberately **no**
-  per-element toggles that duplicate a config option (no `hc` / `sc` / `sd` / `st`); placing an
-  element only decides *where/how big* it is, not a divergent content behaviour. This keeps a
-  single source of truth for those settings and matches how Default/Focus already behave.
+- **Departure field (`t=1`) — the group model.** A **Departure** is three `t=1` elements
+  sharing a departure slot `di` (0–2, soonest-first), one per field `fk` (badge / direction /
+  time). `di` is the permanent **data binding** (the properties sheet labels it "Departure
+  N"); `sp` is the **layout grouping** flag. `sp=0` (connected): the editor moves the three as
+  a row; `sp=1` (split): they move independently and cannot be re-connected (§4.5.1). The
+  firmware **ignores `sp`** — it just draws each field at its own `x,y`, so connected/split is
+  purely an editor concern. Each field has its own colour (`c`/`col`), font (`s`), scale (`k`)
+  and alignment (`a`); the direction field also has a marquee width `w`. Up to **three**
+  departures (three distinct `di`) → at most nine `t=1` elements.
+- **Config-driven behaviour — no per-element overrides.** Data-bound elements render exactly
+  like the built-in board: the **Departure fields** (badge vs. plain text) and **Station name**
+  honour the **global config** (`stripCity` "Hide city names", `showLineBadges` "Line badges")
+  at draw time via the existing `city()` / `line_badges_enabled()` paths. There are
+  deliberately **no** per-element toggles that duplicate a config option (no `hc` / `sc` /
+  `sd` / `st`); placing an element decides *where / how big / what colour* it is, not a
+  divergent content behaviour. Single source of truth, matching Default/Focus.
 - **Colour (`c` + optional `col`):** every element that has a `c` slot may instead carry an
   optional **`col`** (24-bit RGB `0xRRGGBB`, stored as a `u32`) that overrides the preset `c`.
-  Absent `col` → use the preset. This applies to the single-colour elements (Text, Station,
-  Clock, Date, Divider, Icon). The **Departures block keeps its two-tone board scheme**
-  (amber text / copper time / badge, exactly as the built-in board) and takes **neither `c`
-  nor `col`** — recolouring the board is out of scope.
+  Absent `col` → use the preset. This applies to Text, **each Departure field** (badge /
+  direction / time individually), Station, Clock, Date, Divider, and Icon. Default Departure
+  colours mirror the board scheme (badge & direction amber `c=0`, time copper `c=1`).
 - `v` (Text literal): bounded `String<N>` on the firmware side (see §5.5). Watch the
   unescape budget in §6.
 - **Scaling (`k`) & fonts (v1 requirement):** embedded-graphics mono fonts are fixed-size;
@@ -366,9 +423,10 @@ Notes:
   each source pixel as a `k×k` block (so `M` at `k=2` yields a 12×20 glyph). Text metrics used
   for layout/marquee/clip math scale accordingly (advance = `char_w × k`, height = `font_h ×
   k`). The simulator implements the **identical** blitter so WYSIWYG holds glyph-for-glyph.
-  Applies to every text-bearing type (Text, Station, Clock, Date).
+  Applies to every text-bearing type (Text, each Departure field, Station, Clock, Date).
 - **Data binding** is implicit in the type: types `1–4` pull from live runtime data at draw
-  time (departures, station name, `now_unix`); types `0,5,6` are static.
+  time (a Departure field → its slot's line/destination/minutes, station name, `now_unix`);
+  types `0,5,6` are static.
 
 ### 5.5 Bounds & validation (enforced on **both** phone and firmware)
 - **`LAYOUT_MAX_BYTES` — the authoritative flash bound (recommend 1536).** A layout is valid
@@ -377,11 +435,16 @@ Notes:
 - `MAX_ELEMENTS` — recommend **16**, a secondary sanity limit that bounds the heapless `Vec`.
 - Text literal `v` — recommend `String<24>` (bounds a single field + the storage unescape
   buffer, §6). The `LAYOUT_MAX_BYTES` cap still governs the total.
-- Numeric ranges clamped: `x,y,w,h ∈ 0..=64`, `n ∈ 1..=4`, `k ∈ 1..=3`, `c ∈ 0..=2`,
-  `a ∈ 0..=2`, indices within their enums.
+- Numeric ranges clamped: `x,y,w,h ∈ 0..=64`, `k ∈ 1..=3`, `c ∈ 0..=2`, `a ∈ 0..=2`, indices
+  within their enums.
+- Departure fields (`t=1`): `di ∈ 0..=2`, `fk ∈ 0..=2`, `sp ∈ {0,1}`. **At most three
+  departures** (three distinct `di`); the editor caps the palette at three, and the firmware
+  simply renders whatever `di` values are present (ignoring any `di > 2`). Duplicate
+  `(di, fk)` pairs are allowed by the renderer (it just draws both) but the editor won't create
+  them.
 - `col` (optional custom colour) — a `u32` masked to 24 bits (`col & 0xFFFFFF`); any value is
-  otherwise valid. When present it overrides `c`. On the Departures block (`t=1`) `col` is
-  ignored (§5.4).
+  otherwise valid. When present it overrides `c` (all colourable elements, including each
+  Departure field).
 - The firmware must **defensively clamp/skip** any out-of-range value rather than trust the
   payload (a hand-crafted POST must never panic the render task). Elements fully off-panel are
   skipped; partially off-panel are clipped by the existing `pset`/clip helpers.
@@ -464,6 +527,11 @@ already noted in `storage.rs`).
   when a custom colour is set — keeping the common preset case compact for flash. Add an
   `elem_color` helper (used by the renderer, §7.5) that returns the `col` RGB when present,
   else the preset for `c`.
+- **Departure-field slots.** Element also carries `di: u8` (departure slot 0–2), `fk: u8`
+  (field 0=badge/1=direction/2=time) and `sp: bool` (split), all `#[serde(default)]` (→ 0 /
+  false) so they're omitted for non-departure elements and for the connected default. Only
+  meaningful when `t == 1`. `sp` is editor state that the firmware reads but does not act on
+  (§7.5 draws each field by its own `x,y` regardless).
 - **UI mode.** Replace the existing boolean Default/Focus toggle in `Config` (the uncommitted
   `focus`-style field) with a three-state **`ui_mode`** (JSON `uiMode`): `0 = Default`,
   `1 = Focus`, `2 = Custom`. Represent it as a `u8` (or a small `#[repr(u8)]` enum that
@@ -556,20 +624,31 @@ already noted in `storage.rs`).
   (`draw_focus` is assumed to already exist; this feature does not modify it.)
 - `draw_custom_layout` iterates `layout.e` in order and dispatches on `t`, reusing existing
   primitives: `left` / `centered` / `draw_marquee` / `draw_marquee_clipped` (text, station,
-  clock, date), a parameterized extraction of `draw_departures`' row logic (Departures block:
-  badge via `draw_badge`, destination marquee, time / `draw_train_front`), `rule` (divider),
-  and `draw_train_front` / the Z-blind / `arrow` glyphs (icon).
-- **Config-driven, not element-driven.** The Departures and Station paths read the **same
-  global config** the built-in board uses — `shared::line_badges_enabled()` for badges vs.
-  plain text and `city()` (`shared::strip_city_enabled()`) for city-stripping — **not** any
-  per-element flag (there are none, §5.4). The parameterized `draw_departures` takes only
-  geometry (origin, width, rows, row height) from the element; all content behaviour comes from
-  config, so it stays in lock-step with the Default board and Focus view.
+  clock, date), `draw_badge` / `draw_marquee` / minutes-formatting + `draw_train_front`
+  (Departure fields), `rule` (divider), and `draw_train_front` / the Z-blind / `arrow` glyphs
+  (icon).
+- **Departure field (`t=1`) rendering.** For each field, look up the live departure at slot
+  `di` in `deps` (soonest-first). If that slot is **absent** (fewer live departures than `di+1`),
+  draw nothing. Otherwise draw by `fk` at the element's own `x,y` (the firmware ignores `sp`):
+  - `fk=0` **badge:** the line as a filled `draw_badge` when `line_badges_enabled()`, else plain
+    text — the same config choice as the built-in board.
+  - `fk=1` **direction:** the destination, passed through `city()`, as a `draw_marquee` clipped
+    to the element's `w`.
+  - `fk=2` **time:** the minutes (`N'` / `--`), or the `draw_train_front` "now" pictogram when
+    the departure leaves now — the same logic as the built-in row's time column.
+  Each uses its own colour (`elem_color`), font (`s`) and scale (`k`). Because fields carry
+  absolute positions, there is **no inter-field layout dependency** at render time — the editor
+  arranges badge/direction/time sensibly.
+- **Config-driven, not element-driven.** The Departure fields and Station path read the **same
+  global config** the built-in board uses — `shared::line_badges_enabled()` for badge vs. plain
+  text and `city()` (`shared::strip_city_enabled()`) for city-stripping — **not** any
+  per-element flag (there are none, §5.4). So a custom layout stays in lock-step with the
+  Default board and Focus view.
 - **Colour resolution:** a single `elem_color(el)` helper returns `Color::new(r,g,b)` from
   `el.col` (unpacking `0xRRGGBB`) when it is present, else the preset `Color` for `el.c`. Its
   result goes through the existing `scaled()` brightness choke point like every other colour,
-  so custom colours dim with the panel. The Departures block ignores `col` and keeps its
-  amber/copper scheme (§5.4).
+  so custom colours dim with the panel. Applies to every colourable element, **each Departure
+  field included**.
 - **Font scaling (`k`, v1):** implement a `blit_scaled_text` helper that reads a mono font
   glyph bitmap and draws each source pixel as a `k×k` block, with matching scaled metrics for
   the marquee/clip helpers. All text-bearing types route through it. All drawing stays behind
@@ -620,15 +699,27 @@ self-contained page.
     `AMBER`, `DIM`) rather than approximations, and mirror the firmware's `elem_color`
     resolution — draw `col` (`0xRRGGBB`) when present, else the preset `c`.
   - **Marquee/clip/badge math:** mirror `draw_marquee`, `draw_marquee_clipped`, `draw_badge`
-    and the departures-row layout so wrapping, clipping and badge sizing look identical.
+    and the per-field departure rendering (§7.5) so wrapping, clipping and badge sizing look
+    identical.
 - The simulator is the single source of truth for both the editor canvas and the thumbnail;
-  factor it as one draw function taking `(layout, data, scale, frameOrStatic)`.
+  factor it as one draw function taking `(layout, data, scale, frameOrStatic)`. It draws each
+  Departure field (`t=1`) exactly like the firmware — by `di`/`fk` at the field's own `x,y` —
+  independent of the connected/split state.
 
 ### 8.3 Editor overlay & interactions
 - Build the overlay, app bar, canvas, palette, selection chrome, and properties sheet per §4.
 - Hit-testing: map touch coordinates → LED coordinates via the current scale; select the
   top-most element whose bounds contain the point; handle drags on body (move) and handles
   (resize) with 1-LED snapping and clamping.
+- **Selection highlight (all elements):** render a clear outline/glow on the selected element
+  and name it in the sheet header, so it's unambiguous which element is being edited (§4.5).
+- **Departure groups (editor-only state):** track connected vs. split per departure slot via
+  each field's `sp` flag. While a slot is connected (`sp=0`), a drag on any of its three fields
+  moves all three together and the group is drawn with a shared outline (the selected field
+  emphasized). A **Split** control in the sheet, or a **double-tap** on the group, sets `sp=1`
+  on all three fields — thereafter each moves independently and no reconnect is offered.
+  Adding/deleting enforces the "≤ 3 departures" and connected-delete-removes-trio rules (§4.4,
+  §4.5.1).
 - Enforce all §5.5 bounds client-side (belt-and-suspenders with the firmware).
 
 ### 8.4 Networking & live-preview driver
@@ -661,9 +752,12 @@ self-contained page.
   the simulator. This is inherent to the panel, not a bug; surface a brief note near the
   custom picker ("Colours may look brighter/washed on the panel") and let the live on-panel
   preview (§4.3) be the source of truth. No gamut remapping in v1.
-- **Layout references live data that's absent:** Departures/Station render "no service"/empty
-  gracefully (as the built-in board already does); Clock/Date before SNTP sync render a
-  placeholder (`--:--`) rather than a wrong time (`now_unix()` returns `None` pre-sync).
+- **Layout references live data that's absent:** a Departure field whose slot `di` has no live
+  departure (fewer are running than placed) draws **nothing** for that field until one exists;
+  Station renders empty gracefully (as the built-in board already does); Clock/Date before SNTP
+  sync render a placeholder (`--:--`) rather than a wrong time (`now_unix()` returns `None`
+  pre-sync). In the phone simulator, sample data fills all three slots so every placed departure
+  previews; the live on-panel preview shows the real slots.
 - **Custom mode with no/empty layout:** the firmware falls back to the Default board so the
   panel is never blank (§7.5); the main-page UI steers around this by opening the editor when
   Custom is tapped without a saved layout, and Clear-custom-layout resets the mode to Default.
@@ -696,10 +790,11 @@ A suggested order that keeps each step independently verifiable. All of it is v1
    render on `uiMode` (§7.5) with Custom→Default fallback. *Verify:* `uiMode` round-trips via
    `/config`; a hand-POSTed layout persists and reloads across reboot; the panel switches
    Default/Focus/Custom by mode (via logs / a manual `/config` POST).
-2. **Firmware renderer + scaling.** `draw_custom_layout` for all element types (§5.4), plus the
-   `blit_scaled_text` helper so both fonts (`s`) and integer scale (`k ∈ {1,2,3}`) work. *Verify:*
-   in Custom mode a POSTed layout draws on the panel at any font/scale; empty layout falls back
-   to the Default board.
+2. **Firmware renderer + scaling.** `draw_custom_layout` for all element types (§5.4) — including
+   per-field Departure rendering by `di`/`fk` (§7.5) — plus the `blit_scaled_text` helper so both
+   fonts (`s`) and integer scale (`k ∈ {1,2,3}`) work. *Verify:* in Custom mode a POSTed layout
+   draws on the panel at any font/scale; departure fields resolve to the right live slot; a
+   missing slot draws nothing; empty layout falls back to the Default board.
 3. **Live-preview endpoints + watchdog.** `POST /preview`, `POST /preview/end`, the transient
    mirror, and the auto-revert timer (§7.4). *Verify:* a POSTed preview shows on the panel
    regardless of `uiMode` without writing flash; the panel reverts to the persisted mode + layout
@@ -708,8 +803,11 @@ A suggested order that keeps each step independently verifiable. All of it is v1
    math) driving both the editor canvas and the main-page thumbnail (`GET /layout`). *Verify:* the
    simulator matches the panel glyph-for-glyph for every element type and scale.
 5. **Main-page selector + editor.** The three-way mode selector (§8.1) wired to `/config`; the
-   editor overlay, palette/add, move/resize/delete, properties sheet with colour/font/scale/align
-   controls and nudges, dirty tracking, Save (sets Custom) / Cancel / Clear (sets Default) — wired
-   to the live-preview driver (§8.4). *Verify:* switch modes from the main page; full design →
-   live panel mirroring → save → persisted as Custom; Cancel/abandon reverts; Clear returns to
-   Default.
+   editor overlay, palette/add (incl. the Departure group of three fields, §4.4), move/resize/
+   delete, the connected-move + double-tap/Split behaviour and per-field selection highlight
+   (§4.5.1, §8.3), properties sheet with colour/font/scale/align controls and nudges, dirty
+   tracking, Save (sets Custom) / Cancel / Clear (sets Default) — wired to the live-preview
+   driver (§8.4). *Verify:* switch modes from the main page; add up to three departures; split a
+   departure and confirm its fields move independently and can't reconnect; per-field colour &
+   scale; full design → live panel mirroring → save → persisted as Custom; Cancel/abandon
+   reverts; Clear returns to Default.
