@@ -109,11 +109,20 @@
   .sheet{
     width:100%;max-width:440px;background:var(--bg);
     border-radius:18px 18px 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.5);
-    padding:20px 20px calc(24px + env(safe-area-inset-bottom));
+    padding:0 20px calc(24px + env(safe-area-inset-bottom));
+    /* Cap the height and let the options scroll — on a short viewport the list is taller than
+       the screen, so without this the bottom rows (auto-dim window, turn-off) get clipped. */
+    max-height:calc(100dvh - env(safe-area-inset-top) - 12px);
+    overflow-y:auto;-webkit-overflow-scrolling:touch;
     animation:sheet-up .22s ease-out;
   }
   @keyframes sheet-up{from{transform:translateY(100%);}to{transform:translateY(0);}}
-  .sheet-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+  /* Sticky so the title + close stay reachable while the options scroll underneath. */
+  .sheet-head{
+    position:sticky;top:0;z-index:1;background:var(--bg);
+    display:flex;align-items:center;justify-content:space-between;
+    padding:20px 0 10px;margin-bottom:4px;
+  }
   .sheet-head h2{margin:0;font-size:20px;color:var(--cream);}
   .sheet-close{background:none;border:none;color:var(--muted);font-size:24px;line-height:1;cursor:pointer;padding:4px 6px;}
   .opt{display:flex;align-items:center;gap:16px;padding:14px 0;}
@@ -137,6 +146,14 @@
     padding:11px 12px;font-family:inherit;font-size:16px;
   }
   .opt + .opt{border-top:1px solid #241d16;}
+  /* A parent toggle and the controls it governs. The nested block shares a left accent rail and
+     an indent, so when it appears it clearly reads as belonging to the toggle above it rather
+     than as another top-level option. */
+  .opt-group{border-top:1px solid #241d16;}
+  .opt-group > .opt{border-top:none;}
+  .group-sub{margin:0 0 6px 10px;padding-left:16px;border-left:2px solid var(--accent);}
+  .group-sub .opt{padding-top:12px;padding-bottom:12px;}
+  .group-sub .opt + .opt{border-top:1px solid #241d16;}
 </style>
 </head>
 <body>
@@ -172,6 +189,17 @@
       </span>
     </label>
 
+    <label class="opt" for="opt-focus">
+      <span class="opt-text">
+        <span class="opt-title">Single-departure view</span>
+        <span class="opt-sub muted">Focus on the next departure with a big countdown, instead of the three-departure board.</span>
+      </span>
+      <span class="switch">
+        <input type="checkbox" id="opt-focus">
+        <span class="slider"></span>
+      </span>
+    </label>
+
     <div class="opt opt-col">
       <div class="opt-row">
         <span class="opt-title">Brightness</span>
@@ -180,23 +208,40 @@
       <input type="range" class="range" id="opt-brightness" min="1" max="10" step="1" value="6" aria-label="Brightness">
     </div>
 
-    <label class="opt" for="opt-auto">
-      <span class="opt-text">
-        <span class="opt-title">Auto-dim at night</span>
-        <span class="opt-sub muted">Drop to 10% during the time window below.</span>
-      </span>
-      <span class="switch">
-        <input type="checkbox" id="opt-auto">
-        <span class="slider"></span>
-      </span>
-    </label>
+    <div class="opt-group">
+      <label class="opt" for="opt-auto">
+        <span class="opt-text">
+          <span class="opt-title">Auto-dim at night</span>
+          <span class="opt-sub muted">Dim (or switch off) the display during a nightly time window.</span>
+        </span>
+        <span class="switch">
+          <input type="checkbox" id="opt-auto">
+          <span class="slider"></span>
+        </span>
+      </label>
 
-    <div class="opt opt-col" id="reduced-window">
-      <span class="opt-title">Dim from</span>
-      <div class="time-row">
-        <input type="time" class="time" id="opt-start" value="20:00" aria-label="Dim from">
-        <span class="muted">to</span>
-        <input type="time" class="time" id="opt-end" value="08:00" aria-label="Dim until">
+      <!-- Governed by Auto-dim: nested under it with a shared left rail, and shown only while
+           auto-dim is on (toggled in renderConfig). -->
+      <div class="group-sub" id="dim-sub">
+        <div class="opt opt-col">
+          <span class="opt-title">Active window</span>
+          <div class="time-row">
+            <input type="time" class="time" id="opt-start" value="20:00" aria-label="Dim from">
+            <span class="muted">to</span>
+            <input type="time" class="time" id="opt-end" value="08:00" aria-label="Dim until">
+          </div>
+        </div>
+
+        <label class="opt" for="opt-offdim">
+          <span class="opt-text">
+            <span class="opt-title">Turn off completely</span>
+            <span class="opt-sub muted">Switch the display fully off during the window, instead of dimming it.</span>
+          </span>
+          <span class="switch">
+            <input type="checkbox" id="opt-offdim">
+            <span class="slider"></span>
+          </span>
+        </label>
       </div>
     </div>
 
@@ -456,11 +501,13 @@ $("save").addEventListener("click", async () => {
 
 // ---------- settings sheet (board config: GET/POST /config) ----------
 const sheet = $("settings"), setStatus = $("settings-status");
-const stripToggle = $("opt-stripcity"), badgesToggle = $("opt-badges"), brightRange = $("opt-brightness"), brightVal = $("bright-val"),
-      autoToggle = $("opt-auto"), startTime = $("opt-start"), endTime = $("opt-end"), reducedWindow = $("reduced-window");
+const stripToggle = $("opt-stripcity"), badgesToggle = $("opt-badges"), focusToggle = $("opt-focus"),
+      brightRange = $("opt-brightness"), brightVal = $("bright-val"),
+      autoToggle = $("opt-auto"), startTime = $("opt-start"), endTime = $("opt-end"),
+      dimSub = $("dim-sub"), offToggle = $("opt-offdim");
 let configLoaded = false;
 // The board's current settings; controls mirror this and every change posts the whole object.
-let cfg = { stripCity:false, showLineBadges:true, brightness:6, autoBrightness:true, reducedStart:1200, reducedEnd:480 };
+let cfg = { stripCity:false, showLineBadges:true, focusView:false, brightness:6, autoBrightness:true, offWhenDimmed:false, reducedStart:1200, reducedEnd:480 };
 
 const toMin = (hhmm) => { const [h,m] = hhmm.split(":").map(Number); return h*60 + m; };
 const toHHMM = (min) => `${String(Math.floor(min/60)).padStart(2,"0")}:${String(min%60).padStart(2,"0")}`;
@@ -468,12 +515,15 @@ const toHHMM = (min) => `${String(Math.floor(min/60)).padStart(2,"0")}:${String(
 function renderConfig(){
   stripToggle.checked = !!cfg.stripCity;
   badgesToggle.checked = !!cfg.showLineBadges;
+  focusToggle.checked = !!cfg.focusView;
   brightRange.value = cfg.brightness;
   brightVal.textContent = (cfg.brightness * 10) + "%";
   autoToggle.checked = !!cfg.autoBrightness;
+  offToggle.checked = !!cfg.offWhenDimmed;
   startTime.value = toHHMM(cfg.reducedStart);
   endTime.value = toHHMM(cfg.reducedEnd);
-  reducedWindow.classList.toggle("hidden", !cfg.autoBrightness); // time window only matters when auto-dim is on
+  // The time window and the turn-off-completely toggle only matter while auto-dim is on.
+  dimSub.classList.toggle("hidden", !cfg.autoBrightness);
 }
 
 function openSettings(){
@@ -517,7 +567,9 @@ async function applyChange(mutate){
 
 stripToggle.addEventListener("change", () => applyChange(() => { cfg.stripCity = stripToggle.checked; }));
 badgesToggle.addEventListener("change", () => applyChange(() => { cfg.showLineBadges = badgesToggle.checked; }));
+focusToggle.addEventListener("change", () => applyChange(() => { cfg.focusView = focusToggle.checked; }));
 autoToggle.addEventListener("change", () => applyChange(() => { cfg.autoBrightness = autoToggle.checked; }));
+offToggle.addEventListener("change", () => applyChange(() => { cfg.offWhenDimmed = offToggle.checked; }));
 // Live-update the % label while sliding; persist once the user lets go.
 brightRange.addEventListener("input", () => { brightVal.textContent = (brightRange.value * 10) + "%"; });
 brightRange.addEventListener("change", () => applyChange(() => { cfg.brightness = +brightRange.value; }));

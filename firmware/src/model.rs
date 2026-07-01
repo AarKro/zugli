@@ -71,12 +71,20 @@ pub struct Config {
     /// otherwise it stays at the manual [`brightness`](Config::brightness) level all day.
     #[serde(rename = "autoBrightness")]
     pub auto_brightness: bool,
+    /// When `true`, the panel turns fully off (all LEDs dark) during the reduced window instead
+    /// of dimming to 10 %. Only meaningful while [`auto_brightness`](Config::auto_brightness) is on.
+    #[serde(rename = "offWhenDimmed")]
+    pub off_when_dimmed: bool,
     /// Start/end of the reduced-brightness window, as minutes since local midnight (e.g.
     /// 20:00 = 1200). The window wraps past midnight when `start > end`.
     #[serde(rename = "reducedStart")]
     pub reduced_start: u16,
     #[serde(rename = "reducedEnd")]
     pub reduced_end: u16,
+    /// When `true`, the panel shows the single-departure focus view (one connection, big
+    /// countdown) instead of the default board of the next three departures.
+    #[serde(rename = "focusView")]
+    pub focus_view: bool,
 }
 
 impl Default for Config {
@@ -86,8 +94,10 @@ impl Default for Config {
             show_line_badges: true, // badges on by default
             brightness: 6,          // 60 %
             auto_brightness: true,  // preserve the board's existing night-dimming behaviour
+            off_when_dimmed: false, // dim to 10 % by default, not fully off
             reduced_start: 20 * 60, // 20:00
             reduced_end: 8 * 60,    // 08:00
+            focus_view: false,      // default to the three-departure board
         }
     }
 }

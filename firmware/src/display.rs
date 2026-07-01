@@ -66,7 +66,13 @@ fn current_brightness() -> u32 {
     };
     let local_min = ((unix + swiss_offset_seconds(unix)).rem_euclid(86_400) / 60) as u16;
     if in_window(local_min, crate::shared::reduced_start_min(), crate::shared::reduced_end_min()) {
-        REDUCED_BRIGHTNESS
+        // Inside the window: either dim to the low level, or turn the panel fully off (0 %, every
+        // colour scales to black) when the user opted for that.
+        if crate::shared::off_when_dimmed_enabled() {
+            0
+        } else {
+            REDUCED_BRIGHTNESS
+        }
     } else {
         base
     }
@@ -350,7 +356,13 @@ pub fn draw_state(fb: &mut FBType, state: &DisplayState, frame: u32) -> bool {
         DisplayState::Provisioning => draw_provisioning(fb, frame),
         DisplayState::Connecting => draw_connecting(fb, frame),
         DisplayState::IdleAddress { octets } => draw_idle(fb, *octets, frame),
-        DisplayState::Departures { station, deps } => draw_departures(fb, station, deps, frame),
+        DisplayState::Departures { station, deps } => {
+            if crate::shared::focus_view_enabled() {
+                draw_focus(fb, station, deps, frame)
+            } else {
+                draw_departures(fb, station, deps, frame)
+            }
+        }
         DisplayState::Offline => draw_offline(fb, frame),
     }
 }
@@ -639,6 +651,161 @@ fn draw_departures(
     scrolling
 }
 
+/// Single-departure **focus view** (config `focusView`): instead of the three-row board, give the
+/// whole panel to the next departure. The watched stop sits on top (shared with the board so the
+/// two views feel like one product), then the next connection's line badge + destination, a large
+/// 7-segment countdown of its minutes as the focal element, and a small footer for the departure
+/// after it. Returns `true` while anything (the heading or the destination) is mid-scroll.
+fn draw_focus(
+    fb: &mut FBType,
+    station: &str,
+    deps: &[crate::model::Departure],
+    frame: u32,
+) -> bool {
+    let mut scrolling =
+        draw_marquee(fb, city(station), 1, 0, COLS as i32 - 2, style(&FONT_6X10, AMBER), 6, frame);
+    rule(fb, 11, ACCENT);
+
+    let Some(next) = deps.first() else {
+        // Online, but nothing tracked is departing — same message as the board.
+        centered(fb, "no service", 32, style(&FONT_5X7, DIM), 5);
+        return scrolling;
+    };
+
+    // Identity row: the next departure's line (badge or plain text) with its destination beside it.
+    let badge_end = if crate::shared::line_badges_enabled() {
+        draw_badge(fb, next.line.as_str(), 1, 14, AMBER, OFF)
+    } else {
+        left(fb, next.line.as_str(), 1, 15, style(&FONT_6X10, AMBER));
+        1 + next.line.chars().count() as i32 * 6
+    };
+    let dest_x = badge_end + 2;
+    let dest_avail = COLS as i32 - 1 - dest_x;
+    if dest_avail > 0 {
+        scrolling |= draw_marquee_clipped(
+            fb,
+            city(next.destination.as_str()),
+            dest_x,
+            16,
+            dest_avail,
+            14,
+            11,
+            style(&FONT_5X7, AMBER),
+            5,
+            frame,
+        );
+    }
+
+    // Centre: the big countdown for the next departure — the whole point of this view.
+    draw_big_minutes(fb, next.minutes, 40);
+
+    // Footer: the departure after the next one, small — "then <line> … <minutes>". Omitted when
+    // only one departure is upcoming.
+    if let Some(after) = deps.get(1) {
+        let dim = style(&FONT_5X7, DIM);
+        left(fb, "then", 1, 56, dim);
+        left(fb, after.line.as_str(), 26, 56, style(&FONT_5X7, AMBER));
+        let mins = fmt_minutes(after.minutes);
+        let mins_x = (COLS as i32 - 1 - mins.chars().count() as i32 * 5).max(26 + 6 * 4);
+        left(fb, &mins, mins_x, 56, style(&FONT_5X7, ACCENT));
+    }
+
+    scrolling
+}
+
+// Big-number geometry for the focus view's countdown.
+const BIG_DW: i32 = 15; // 7-segment digit cell width
+const BIG_DH: i32 = 26; // digit cell height
+const BIG_GAP: i32 = 4; // gap between digits
+const BIG_APOS_W: i32 = 5; // width reserved for the trailing apostrophe
+
+/// Fill an axis-aligned rectangle in `c` (scaled to the active brightness like every other draw).
+fn fill_rect(fb: &mut FBType, x: i32, y: i32, w: i32, h: i32, c: Color) {
+    let _ = Rectangle::new(Point::new(x, y), Size::new(w.max(0) as u32, h.max(0) as u32))
+        .into_styled(PrimitiveStyle::with_fill(scaled(c)))
+        .draw(fb);
+}
+
+/// Draw the next departure's minutes as a large, centred 7-segment figure whose vertical centre is
+/// panel row `cy` — the focal element of the focus view. `Some(0)` (leaving now) shows the
+/// front-of-tram pictogram blown up; `None` (no service) shows two large dashes.
+fn draw_big_minutes(fb: &mut FBType, minutes: Option<u16>, cy: i32) {
+    match minutes {
+        Some(0) => {
+            // Departing now: the board's front-of-tram pictogram, doubled in size and centred.
+            draw_train_front_scaled(fb, (COLS as i32 - TRAIN_W * 2) / 2, cy - TRAIN_H, 2, ACCENT);
+        }
+        None => {
+            // The board's `--`, drawn big as two centred bars.
+            const T: i32 = 4;
+            let total = 2 * BIG_DW + BIG_GAP;
+            let mut x = (COLS as i32 - total) / 2;
+            let y = cy - T / 2;
+            fill_rect(fb, x, y, BIG_DW, T, DIM);
+            x += BIG_DW + BIG_GAP;
+            fill_rect(fb, x, y, BIG_DW, T, DIM);
+        }
+        Some(m) => {
+            let mut buf: String<8> = String::new();
+            let _ = write!(buf, "{}", m);
+            let n = buf.chars().count() as i32;
+            let total = n * BIG_DW + (n - 1) * BIG_GAP + BIG_APOS_W;
+            let mut x = (COLS as i32 - total) / 2;
+            let y = cy - BIG_DH / 2;
+            for ch in buf.chars() {
+                draw_seg_digit(fb, x, y, ch as u8 - b'0', AMBER);
+                x += BIG_DW + BIG_GAP;
+            }
+            // Trailing apostrophe high on the right, echoing the board's `N'`.
+            fill_rect(fb, x - BIG_GAP + 1, y, 2, 6, AMBER);
+        }
+    }
+}
+
+/// Draw one 7-segment digit `d` (0–9) in cell `(x, y)` sized [`BIG_DW`]×[`BIG_DH`]. Segments are
+/// labelled a–g (a=top, b=top-right, c=bottom-right, d=bottom, e=bottom-left, f=top-left, g=middle).
+fn draw_seg_digit(fb: &mut FBType, x: i32, y: i32, d: u8, c: Color) {
+    const T: i32 = 3; // segment thickness
+    // Bit per segment: a=0, b=1, c=2, d=3, e=4, f=5, g=6.
+    const MASK: [u8; 10] = [
+        0b0111111, // 0
+        0b0000110, // 1
+        0b1011011, // 2
+        0b1001111, // 3
+        0b1100110, // 4
+        0b1101101, // 5
+        0b1111101, // 6
+        0b0000111, // 7
+        0b1111111, // 8
+        0b1101111, // 9
+    ];
+    let m = MASK[(d % 10) as usize];
+    let on = |seg: u8| m & (1 << seg) != 0;
+    let (w, h) = (BIG_DW, BIG_DH);
+    let mid = y + (h - T) / 2;
+    if on(0) {
+        fill_rect(fb, x, y, w, T, c); // a — top
+    }
+    if on(6) {
+        fill_rect(fb, x, mid, w, T, c); // g — middle
+    }
+    if on(3) {
+        fill_rect(fb, x, y + h - T, w, T, c); // d — bottom
+    }
+    if on(5) {
+        fill_rect(fb, x, y, T, h / 2, c); // f — top-left
+    }
+    if on(1) {
+        fill_rect(fb, x + w - T, y, T, h / 2, c); // b — top-right
+    }
+    if on(4) {
+        fill_rect(fb, x, y + h / 2, T, h / 2, c); // e — bottom-left
+    }
+    if on(2) {
+        fill_rect(fb, x + w - T, y + h / 2, T, h / 2, c); // c — bottom-right
+    }
+}
+
 /// Like [`draw_marquee`], but the text is clipped to the band `[x0, x0+avail) × [clip_top,
 /// clip_top+clip_h)` so a scrolling label can't spill into neighbouring content (the badge to
 /// its left or the time to its right). Returns `true` when it is scrolling.
@@ -727,28 +894,44 @@ fn rule(fb: &mut FBType, y: i32, color: Color) {
         .draw(fb);
 }
 
-/// Width of the [`draw_train_front`] pictogram, in pixels.
+/// Width and height of the [`draw_train_front`] pictogram, in pixels.
 const TRAIN_W: i32 = 9;
+const TRAIN_H: i32 = 10;
 
-/// The "departing now" pictogram: a small front-of-tram glyph (rounded roof, two cab windows as
-/// dark cut-outs, two wheels), drawn 9×9 with its top-left at `(x, y)` in `c`. Stands in for the
-/// minutes when a departure is leaving now — the same idea as SBB's imminent-departure icon.
+/// The "departing now" front-of-tram pictogram (9×10): a rounded roof, a dark **destination-blind
+/// slot** framed by a lit rim — the horizontal line above the windscreen that keeps it reading as a
+/// tram front rather than a ghost — then two cab windows, the body, and two wheels. Same idea as
+/// SBB's imminent-departure icon.
+const TRAIN_GLYPH: [[u8; 9]; 10] = [
+    [0, 0, 1, 1, 1, 1, 1, 0, 0], // rounded roof top
+    [0, 1, 1, 1, 1, 1, 1, 1, 0], // roof
+    [1, 1, 1, 1, 1, 1, 1, 1, 1], // roof front
+    [1, 0, 0, 0, 0, 0, 0, 0, 1], // destination-blind slot (the line above the windows)
+    [1, 1, 1, 1, 1, 1, 1, 1, 1], // lit rim under the blind
+    [1, 0, 0, 0, 1, 0, 0, 0, 1], // windows, split by the centre pillar
+    [1, 0, 0, 0, 1, 0, 0, 0, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1], // body
+    [1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 1, 1, 0, 0, 0, 1, 1, 0], // wheels
+];
+
+/// Draw the front-of-tram pictogram with its top-left at `(x, y)` in `c`.
 fn draw_train_front(fb: &mut FBType, x: i32, y: i32, c: Color) {
-    const T: [[u8; 9]; 9] = [
-        [0, 0, 1, 1, 1, 1, 1, 0, 0],
-        [0, 1, 1, 1, 1, 1, 1, 1, 0],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1],
-        [1, 0, 0, 0, 1, 0, 0, 0, 1],
-        [1, 0, 0, 0, 1, 0, 0, 0, 1],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1],
-        [0, 1, 1, 0, 0, 0, 1, 1, 0],
-    ];
-    for (gy, row) in T.iter().enumerate() {
+    draw_train_front_scaled(fb, x, y, 1, c);
+}
+
+/// Draw the front-of-tram pictogram blown up by an integer `scale` (each lit cell becomes a
+/// `scale`×`scale` block), top-left at `(x, y)`. `scale == 1` is the board's pictogram; the focus
+/// view uses `2` for the large "departing now" state.
+fn draw_train_front_scaled(fb: &mut FBType, x: i32, y: i32, scale: i32, c: Color) {
+    for (gy, row) in TRAIN_GLYPH.iter().enumerate() {
         for (gx, &on) in row.iter().enumerate() {
             if on == 1 {
-                pset(fb, x + gx as i32, y + gy as i32, c);
+                for sy in 0..scale {
+                    for sx in 0..scale {
+                        pset(fb, x + gx as i32 * scale + sx, y + gy as i32 * scale + sy, c);
+                    }
+                }
             }
         }
     }

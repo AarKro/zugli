@@ -33,7 +33,9 @@ static STRIP_CITY: AtomicBool = AtomicBool::new(false);
 static SHOW_LINE_BADGES: AtomicBool = AtomicBool::new(true);
 static BRIGHTNESS_LEVEL: AtomicU32 = AtomicU32::new(6);
 static AUTO_BRIGHTNESS: AtomicBool = AtomicBool::new(true);
+static OFF_WHEN_DIMMED: AtomicBool = AtomicBool::new(false);
 static REDUCED_WINDOW: AtomicU32 = AtomicU32::new(((20 * 60) << 16) | (8 * 60));
+static FOCUS_VIEW: AtomicBool = AtomicBool::new(false);
 
 /// Push a whole [`Config`] into the live mirror (boot load or a config-page change).
 pub fn apply_config(cfg: &Config) {
@@ -41,10 +43,12 @@ pub fn apply_config(cfg: &Config) {
     SHOW_LINE_BADGES.store(cfg.show_line_badges, Ordering::Relaxed);
     BRIGHTNESS_LEVEL.store(cfg.brightness.clamp(1, 10) as u32, Ordering::Relaxed);
     AUTO_BRIGHTNESS.store(cfg.auto_brightness, Ordering::Relaxed);
+    OFF_WHEN_DIMMED.store(cfg.off_when_dimmed, Ordering::Relaxed);
     REDUCED_WINDOW.store(
         ((cfg.reduced_start as u32) << 16) | cfg.reduced_end as u32,
         Ordering::Relaxed,
     );
+    FOCUS_VIEW.store(cfg.focus_view, Ordering::Relaxed);
 }
 
 /// Whether the panel should drop the "City, " prefix from stop/destination names.
@@ -65,6 +69,16 @@ pub fn brightness_level() -> u8 {
 /// Whether time-of-day auto-dimming is enabled.
 pub fn auto_brightness_enabled() -> bool {
     AUTO_BRIGHTNESS.load(Ordering::Relaxed)
+}
+
+/// Whether the panel should turn fully off (rather than dim to 10 %) inside the reduced window.
+pub fn off_when_dimmed_enabled() -> bool {
+    OFF_WHEN_DIMMED.load(Ordering::Relaxed)
+}
+
+/// Whether the single-departure focus view is selected (vs. the three-departure board).
+pub fn focus_view_enabled() -> bool {
+    FOCUS_VIEW.load(Ordering::Relaxed)
 }
 
 /// Start of the reduced-brightness window, minutes since local midnight.

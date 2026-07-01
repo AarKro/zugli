@@ -103,16 +103,18 @@ async fn save(Json(sel): Json<Selection>) -> impl IntoResponse {
 
 /// Current board settings, for the config page's settings sheet to pre-fill its controls.
 async fn get_config() -> impl IntoResponse {
-    let mut body: String<160> = String::new();
+    let mut body: String<224> = String::new();
     let _ = write!(
         body,
-        "{{\"stripCity\":{},\"showLineBadges\":{},\"brightness\":{},\"autoBrightness\":{},\"reducedStart\":{},\"reducedEnd\":{}}}",
+        "{{\"stripCity\":{},\"showLineBadges\":{},\"brightness\":{},\"autoBrightness\":{},\"offWhenDimmed\":{},\"reducedStart\":{},\"reducedEnd\":{},\"focusView\":{}}}",
         shared::strip_city_enabled(),
         shared::line_badges_enabled(),
         shared::brightness_level(),
         shared::auto_brightness_enabled(),
+        shared::off_when_dimmed_enabled(),
         shared::reduced_start_min(),
         shared::reduced_end_min(),
+        shared::focus_view_enabled(),
     );
     Response::ok(OwnedJson(body))
 }
@@ -121,8 +123,8 @@ async fn get_config() -> impl IntoResponse {
 /// board immediately — a re-poll re-emits the departures screen, redrawn with the new settings.
 async fn set_config(Json(cfg): Json<BoardConfig>) -> impl IntoResponse {
     info!(
-        "config: stripCity={} showLineBadges={} brightness={} autoBrightness={} reduced={}..{}",
-        cfg.strip_city, cfg.show_line_badges, cfg.brightness, cfg.auto_brightness, cfg.reduced_start, cfg.reduced_end
+        "config: stripCity={} showLineBadges={} brightness={} autoBrightness={} offWhenDimmed={} reduced={}..{} focusView={}",
+        cfg.strip_city, cfg.show_line_badges, cfg.brightness, cfg.auto_brightness, cfg.off_when_dimmed, cfg.reduced_start, cfg.reduced_end, cfg.focus_view
     );
     {
         let mut guard = STORE.lock().await;
