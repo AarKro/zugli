@@ -652,31 +652,32 @@ fn draw_departures(
 }
 
 /// Single-departure **focus view** (config `focusView`): instead of the three-row board, give the
-/// whole panel to the next departure. The watched stop sits on top (shared with the board so the
-/// two views feel like one product), then the next connection's line badge + destination, a large
-/// 7-segment countdown of its minutes as the focal element, and a small footer for the departure
-/// after it. Returns `true` while anything (the heading or the destination) is mid-scroll.
+/// whole panel to the next departure. This view intentionally omits the stop heading, so the top of
+/// the panel goes straight to the next connection's line badge + destination, a large 7-segment
+/// countdown of its minutes as the focal element (grown to use the reclaimed height), and a small
+/// footer for the departure after it. Returns `true` while anything (the destination or the footer)
+/// is mid-scroll.
 fn draw_focus(
     fb: &mut FBType,
-    station: &str,
+    _station: &str,
     deps: &[crate::model::Departure],
     frame: u32,
 ) -> bool {
-    let mut scrolling =
-        draw_marquee(fb, city(station), 1, 0, COLS as i32 - 2, style(&FONT_6X10, AMBER), 6, frame);
-    rule(fb, 11, ACCENT);
+    let mut scrolling = false;
 
     let Some(next) = deps.first() else {
-        // Online, but nothing tracked is departing — same message as the board.
-        centered(fb, "no service", 32, style(&FONT_5X7, DIM), 5);
+        // Online, but nothing tracked is departing — same message as the board, vertically centred
+        // now that there's no heading above it.
+        centered(fb, "no service", 28, style(&FONT_5X7, DIM), 5);
         return scrolling;
     };
 
-    // Identity row: the next departure's line (badge or plain text) with its destination beside it.
+    // Identity row at the very top (no stop heading): the next departure's line (badge or plain
+    // text) with its destination beside it.
     let badge_end = if crate::shared::line_badges_enabled() {
-        draw_badge(fb, next.line.as_str(), 1, 14, AMBER, OFF)
+        draw_badge(fb, next.line.as_str(), 1, 1, AMBER, OFF)
     } else {
-        left(fb, next.line.as_str(), 1, 15, style(&FONT_6X10, AMBER));
+        left(fb, next.line.as_str(), 1, 2, style(&FONT_6X10, AMBER));
         1 + next.line.chars().count() as i32 * 6
     };
     let dest_x = badge_end + 2;
@@ -686,9 +687,9 @@ fn draw_focus(
             fb,
             city(next.destination.as_str()),
             dest_x,
-            16,
+            4,
             dest_avail,
-            14,
+            1,
             11,
             style(&FONT_5X7, AMBER),
             5,
@@ -696,18 +697,23 @@ fn draw_focus(
         );
     }
 
-    // Centre: the big countdown for the next departure — the whole point of this view.
-    draw_big_minutes(fb, next.minutes, 40);
+    // Centre: the big countdown for the next departure — the whole point of this view, taller now
+    // that it no longer shares the panel with a stop heading.
+    draw_big_minutes(fb, next.minutes, 33);
 
-    // Footer: the departure after the next one, small — "then <line> … <minutes>". Omitted when
-    // only one departure is upcoming.
+    // Footer: the departure after the next one, small — "next <line> in <minutes>". Omitted when
+    // only one departure is upcoming. The four coloured parts pack left-to-right with exactly one
+    // space between them (never a fixed grid, so line/minute widths don't leave gaps), and the whole
+    // row scrolls as one if it can't fit.
     if let Some(after) = deps.get(1) {
-        let dim = style(&FONT_5X7, DIM);
-        left(fb, "then", 1, 56, dim);
-        left(fb, after.line.as_str(), 26, 56, style(&FONT_5X7, AMBER));
         let mins = fmt_minutes(after.minutes);
-        let mins_x = (COLS as i32 - 1 - mins.chars().count() as i32 * 5).max(26 + 6 * 4);
-        left(fb, &mins, mins_x, 56, style(&FONT_5X7, ACCENT));
+        let segs = [
+            ("next", style(&FONT_5X7, DIM)),
+            (after.line.as_str(), style(&FONT_5X7, AMBER)),
+            ("in", style(&FONT_5X7, DIM)),
+            (mins.as_str(), style(&FONT_5X7, ACCENT)),
+        ];
+        scrolling |= draw_segments_row(fb, &segs, 1, 57, COLS as i32 - 2, 5, 4, frame);
     }
 
     scrolling
@@ -715,9 +721,8 @@ fn draw_focus(
 
 // Big-number geometry for the focus view's countdown.
 const BIG_DW: i32 = 15; // 7-segment digit cell width
-const BIG_DH: i32 = 26; // digit cell height
+const BIG_DH: i32 = 34; // digit cell height
 const BIG_GAP: i32 = 4; // gap between digits
-const BIG_APOS_W: i32 = 5; // width reserved for the trailing apostrophe
 
 /// Fill an axis-aligned rectangle in `c` (scaled to the active brightness like every other draw).
 fn fill_rect(fb: &mut FBType, x: i32, y: i32, w: i32, h: i32, c: Color) {
@@ -749,15 +754,18 @@ fn draw_big_minutes(fb: &mut FBType, minutes: Option<u16>, cy: i32) {
             let mut buf: String<8> = String::new();
             let _ = write!(buf, "{}", m);
             let n = buf.chars().count() as i32;
-            let total = n * BIG_DW + (n - 1) * BIG_GAP + BIG_APOS_W;
-            let mut x = (COLS as i32 - total) / 2;
+            // Centre the digits themselves dead-centre on the panel; the apostrophe is appended
+            // after (hanging to the right), not folded into the centred width, so the number reads
+            // as centred with the marker tacked on.
+            let digits_w = n * BIG_DW + (n - 1) * BIG_GAP;
+            let mut x = (COLS as i32 - digits_w) / 2;
             let y = cy - BIG_DH / 2;
             for ch in buf.chars() {
                 draw_seg_digit(fb, x, y, ch as u8 - b'0', AMBER);
                 x += BIG_DW + BIG_GAP;
             }
             // Trailing apostrophe high on the right, echoing the board's `N'`.
-            fill_rect(fb, x - BIG_GAP + 1, y, 2, 6, AMBER);
+            fill_rect(fb, x - BIG_GAP + 3, y, 2, 6, AMBER);
         }
     }
 }
@@ -839,6 +847,47 @@ fn draw_marquee_clipped(
     let _ = Text::with_baseline(text, Point::new(x0 - offset, y), st, Baseline::Top).draw(&mut target);
     let _ = Text::with_baseline(text, Point::new(x0 - offset + period, y), st, Baseline::Top)
         .draw(&mut target);
+    true
+}
+
+/// Draw a row of coloured text segments on one baseline at `(x0, y)`, separated by `space` px
+/// between adjacent segments. If the assembled row fits within `avail` it sits flush at `x0`;
+/// otherwise the whole row scrolls together as a single marquee (same cadence as [`draw_marquee`]).
+/// Returns `true` while it is scrolling.
+#[allow(clippy::too_many_arguments)] // a layout helper: position, spacing, width and frame all matter
+fn draw_segments_row(
+    fb: &mut FBType,
+    segs: &[(&str, MonoTextStyle<'static, Color>)],
+    x0: i32,
+    y: i32,
+    avail: i32,
+    char_w: i32,
+    space: i32,
+    frame: u32,
+) -> bool {
+    let seg_w = |s: &str| s.chars().count() as i32 * char_w;
+    let total: i32 =
+        segs.iter().map(|(s, _)| seg_w(s)).sum::<i32>() + space * (segs.len() as i32 - 1).max(0);
+
+    // Lay every segment out from `start`, advancing by its width plus one space.
+    let draw_at = |fb: &mut FBType, start: i32| {
+        let mut x = start;
+        for &(s, st) in segs {
+            left(fb, s, x, y, st);
+            x += seg_w(s) + space;
+        }
+    };
+
+    if total <= avail {
+        draw_at(fb, x0);
+        return false;
+    }
+    const GAP: i32 = 14; // blank space between the row and its wrapped copy
+    let period = total + GAP;
+    let phase = frame % (HOLD_FRAMES + period as u32);
+    let offset = phase.saturating_sub(HOLD_FRAMES) as i32; // 1 px/frame after the initial hold
+    draw_at(fb, x0 - offset);
+    draw_at(fb, x0 - offset + period);
     true
 }
 
