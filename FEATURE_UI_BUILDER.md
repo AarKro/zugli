@@ -19,8 +19,8 @@ The device's departures screen is drawn according to a user-selected **UI mode**
 a three-way selector on the config page: **Default** (the built-in departures board, PB §7.7),
 **Focus** (the existing focus view), or **Custom** (the user's built layout). The custom
 layout is shown **only when Custom is selected** — it never overrides Default or Focus merely
-by existing. This reworks the current two-way Default/Focus toggle into a three-way selector;
-the Focus view itself is unchanged.
+by existing. This replaces the current settings-sheet **"Single-departure view"** toggle (the
+`focusView` boolean) with a three-way selector; the Focus view itself is unchanged.
 
 The whole feature must be **phone-first**: the editor is a full-screen, touch-driven surface
 served from the same self-contained `web/index.html`, and the on-screen simulator must be a
@@ -97,9 +97,10 @@ Two related controls sit together on the main config page, directly beneath the
 `save-section`.
 
 **(a) UI-mode selector (segmented control).** A full-width, three-segment control —
-**Default | Focus | Custom** — reworking the existing two-way Default/Focus toggle. It uses
-the same visual language as the tracking-mode switch already at the top of the page (`.mode`
-segments: the active segment highlighted like a selected connection). Selecting a segment:
+**Default | Focus | Custom** — replacing the settings-sheet "Single-departure view" toggle
+(§8.1). It uses the same visual language as the tracking-mode switch already at the top of the
+page (`.mode` segments: the active segment highlighted like a selected connection). Selecting a
+segment:
 - writes the new mode to the board immediately (optimistic `POST /config`, §7.4/§8.4 — the
   same pattern the settings sheet uses), so the panel switches live;
 - **Default / Focus** switch the panel to the respective built-in view at once;
@@ -532,13 +533,14 @@ already noted in `storage.rs`).
   false) so they're omitted for non-departure elements and for the connected default. Only
   meaningful when `t == 1`. `sp` is editor state that the firmware reads but does not act on
   (§7.5 draws each field by its own `x,y` regardless).
-- **UI mode.** Replace the existing boolean Default/Focus toggle in `Config` (the uncommitted
-  `focus`-style field) with a three-state **`ui_mode`** (JSON `uiMode`): `0 = Default`,
-  `1 = Focus`, `2 = Custom`. Represent it as a `u8` (or a small `#[repr(u8)]` enum that
-  serializes as an integer) with `#[serde(default)]` → `0`, so older flash records and the
-  existing config round-trip. This lives in `Config`, so it persists and is edited through the
-  existing `/config` endpoint (§7.4). The old boolean maps forward as `false → Default`,
-  `true → Focus`.
+- **UI mode.** Replace the existing **`focus_view: bool`** field in `Config` (JSON `focusView`,
+  added by the focus-view commit `3bc2fab`) with a three-state **`ui_mode`** (JSON `uiMode`):
+  `0 = Default`, `1 = Focus`, `2 = Custom`. Represent it as a `u8` (or a small `#[repr(u8)]`
+  enum that serializes as an integer) with `#[serde(default)]` → `0`, so older flash records and
+  the existing config round-trip. It lives in `Config` next to the other display settings, so it
+  persists and is edited through the existing `/config` endpoint (§7.4). The old boolean maps
+  forward as `focusView:false → Default`, `focusView:true → Focus`. **Leave the sibling
+  `offWhenDimmed` field (also from `3bc2fab`) untouched** — it's unrelated to UI mode.
 
 ### 7.2 `storage.rs`
 - Add `layout: Option<Layout>` to `Persisted` (with `#[serde(default)]`).
@@ -553,9 +555,11 @@ already noted in `storage.rs`).
   Option<Layout>>` (like `SELECTION`), **not** the render-task-must-never-block atomics used for
   config scalars. The render task reads it (in Custom mode) when drawing the Departures state;
   acceptable because a departures redraw is already event-driven, not per-DMA-frame.
-- **UI mode accessor.** Add `ui_mode()` reading the `uiMode` field mirrored from `Config`
-  (fold it into the existing config live-mirror / `apply_config`, alongside brightness etc.),
-  so the render dispatch (§7.5) is a cheap read.
+- **UI mode accessor.** Replace the existing `FOCUS_VIEW` atomic + `focus_view_enabled()`
+  (from `3bc2fab`) with a `ui_mode()` accessor over a `u8`/enum atomic, set in the existing
+  `apply_config` alongside brightness etc. `focus_view_enabled()` has exactly one caller (the
+  `draw_state` dispatch, §7.5), so this is a small, contained swap; keep the other atoms
+  (`OFF_WHEN_DIMMED`, brightness, …) as they are.
 - `apply_layout(Option<Layout>)` sets the persisted-layout mirror. Called at boot (from flash)
   and on `POST /layout`.
 - **Preview accessors** for §7.5: a `preview_active()` flag and the transient `preview_layout()`
@@ -593,7 +597,11 @@ already noted in `storage.rs`).
 - **UI mode is *not* a new endpoint.** Selecting Default / Focus / Custom is a `Config` change,
   so it flows through the **existing `GET`/`POST /config`** (`uiMode` field, §7.1). The
   main-page selector, the Save-sets-Custom step (§4.6), and Clear-sets-Default (§4.7) all POST
-  `/config`. The clamp on `POST /config` must reject an out-of-range `uiMode`.
+  `/config`. The clamp on `POST /config` must reject an out-of-range `uiMode`. Note `get_config`
+  **hand-builds** the config JSON with a `write!` format string (and `set_config` logs it):
+  swap the existing `"focusView":{}` token (with `shared::focus_view_enabled()`) for
+  `"uiMode":{}` (with `shared::ui_mode() as u8`), leaving the sibling `offWhenDimmed` token in
+  place.
 - **Clear custom layout:** a `POST /layout` with empty `e` clears the saved layout (kept as one
   route rather than a separate `DELETE`, to keep the table minimal); the page pairs it with a
   `POST /config` setting `uiMode = Default`.
@@ -601,10 +609,15 @@ already noted in `storage.rs`).
   as `/layout`, so the §6 HTTP-buffer sizing already covers it.
 
 ### 7.5 `display.rs` — the renderer (the core work)
-- The Departures branch of `draw_state` dispatches on the **UI mode** (`shared::ui_mode()`),
-  **not** on whether a custom layout exists — a custom layout never renders unless Custom is
-  the selected mode. During a live preview (§4.3) the transient mirror forces the custom path
-  regardless of mode:
+- The Departures branch of `draw_state` currently reads (from `3bc2fab`):
+  ```
+  DisplayState::Departures { station, deps } =>
+      if focus_view_enabled() { draw_focus(fb, station, deps, frame) }
+      else                    { draw_departures(fb, station, deps, frame) }
+  ```
+  Replace that two-way `if` with a dispatch on the **UI mode** (`shared::ui_mode()`) — **not** on
+  whether a custom layout exists (a custom layout never renders unless Custom is selected). During
+  a live preview (§4.3) the transient mirror forces the custom path regardless of mode:
   ```
   DisplayState::Departures { station, deps } => {
       if preview_active() {
@@ -681,6 +694,12 @@ self-contained page.
   (optimistic `POST /config`, revert-on-failure). Tapping **Custom** when no saved layout
   exists opens the editor instead of setting the mode (§4.1). Reflect the live `uiMode` after
   Save/Clear and on page load (from `GET /config`).
+- **Migrate the existing focus toggle.** The focus-view commit added a settings-sheet checkbox
+  **"Single-departure view"** (`#opt-focus`, bound to `cfg.focusView` via `focusToggle`).
+  **Remove that toggle** (its label/markup and the `focusToggle` handler) — the three-way
+  selector supersedes it. In the page's `cfg` object and `renderConfig()`, replace `focusView`
+  with `uiMode` (default `0`); leave the neighbouring `offWhenDimmed` toggle and all other
+  settings intact.
 - **Entry card + thumbnail.** Add the "Design your board" secondary card beneath the selector
   (§4.1). The thumbnail is a small `<canvas>` rendered by the same simulator draw routine at
   reduced scale, refreshed after each successful save and on page load (from `GET /layout`);
@@ -784,7 +803,7 @@ self-contained page.
 
 A suggested order that keeps each step independently verifiable. All of it is v1.
 
-1. **UI-mode rework + storage plumbing.** Replace the Default/Focus boolean with `uiMode`
+1. **UI-mode rework + storage plumbing.** Replace `Config.focus_view` (`focusView`) with `uiMode`
    (`0/1/2`) in `Config` (§7.1); add `Layout`/`Element` types, `Persisted.layout`, the §6 buffer
    and stack bumps, `GET`/`POST /layout`, `apply_layout`, boot load. Dispatch the Departures
    render on `uiMode` (§7.5) with Custom→Default fallback. *Verify:* `uiMode` round-trips via
