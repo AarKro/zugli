@@ -16,3 +16,4 @@ exactly when to leave.
 - **[ASSEMBLY_AND_FLASHING.md](ASSEMBLY_AND_FLASHING.md)** — the practical "how to build
   one" guide: bill of materials, wiring the panel, installing the toolchain, flashing the
   firmware, and first-time setup.
+- **[FEATURE_UI_BUILDER.md](FEATURE_UI_BUILDER.md)** — detailed feature specification for adding an additional UI builder component.
