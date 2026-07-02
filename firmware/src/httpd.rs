@@ -214,6 +214,7 @@ async fn set_layout(Json(mut layout): Json<Layout>) -> impl IntoResponse {
             None => log::error!("layout: no flash store (won't survive reboot)"),
         }
     }
+    warn_low_heap("layout");
     shared::apply_layout(if empty { None } else { Some(layout) });
     shared::end_preview(); // a save supersedes any in-flight preview (§7.4); no-op if none active
     SELECTION_CHANGED.signal(()); // wake the render/poll path so the panel redraws now
@@ -225,8 +226,25 @@ async fn set_layout(Json(mut layout): Json<Layout>) -> impl IntoResponse {
 /// endpoint (debounced edits + a ~5 s keepalive), so it must never touch the sector. It (re)arms the
 /// ~15 s auto-revert deadline and forces an immediate, poll-free redraw so the panel tracks the
 /// design. The preview overrides the persisted UI mode until it ends or lapses.
+/// Internal (DMA-capable) free-heap floor below which WiFi TX starts failing with `ESP_ERR_NO_MEM`
+/// (seen as `esp_wifi_internal_tx returned error: 257`). Editor use once drove the board into an
+/// intermittent silent freeze consistent with internal-RAM exhaustion; this is the cheap safety net
+/// left behind — quiet in normal use, but if internal RAM ever creeps toward empty it surfaces in
+/// the log instead of a silent hang. Tune if it proves too chatty / too quiet.
+const LOW_HEAP_WARN_BYTES: usize = 6 * 1024;
+
+/// Warn if the internal heap has fallen into the danger zone. Called from the editor's request path
+/// (the load pattern that exposed the pressure). Reading free heap is cheap; it logs only when low.
+fn warn_low_heap(tag: &str) {
+    let internal = esp_alloc::HEAP.free_caps(esp_alloc::MemoryCapability::Internal.into());
+    if internal < LOW_HEAP_WARN_BYTES {
+        log::warn!("heap[{tag}]: internal free={internal} B is low — WiFi TX may fail (NO_MEM)");
+    }
+}
+
 async fn set_preview(Json(mut layout): Json<Layout>) -> impl IntoResponse {
     layout.sanitize();
+    warn_low_heap("preview");
     shared::set_preview(layout);
     Response::ok(json("{\"ok\":true}"))
 }
