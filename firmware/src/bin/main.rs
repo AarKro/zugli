@@ -130,6 +130,13 @@ async fn main(spawner: Spawner) -> ! {
         g.as_mut().map(|s| s.load_config()).unwrap_or_default()
     };
     shared::apply_config(&config);
+    // Seed the live custom-layout mirror from flash before the first departures render, so Custom
+    // mode has its layout ready (FEATURE_UI_BUILDER §7.6).
+    let layout = {
+        let mut g = STORE.lock().await;
+        g.as_mut().and_then(|s| s.load_layout())
+    };
+    shared::apply_layout(layout);
     info!(
         "boot: loaded from flash — wifi creds {}, selection {}",
         if creds.is_some() { "present" } else { "absent" },

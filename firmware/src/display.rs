@@ -12,15 +12,15 @@
 use core::fmt::Write as _;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use embassy_futures::select::{Either, select};
+use embassy_futures::select::{Either3, select3};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Instant, Timer};
 // Latin-1 (ISO-8859-1) font variants — same glyphs/metrics as the `ascii` ones, but with
 // the Western-European accented range (ä ö ü Ä Ö Ü ß …) needed for Swiss station names.
 use embedded_graphics::mono_font::iso_8859_1::{FONT_5X7, FONT_6X10};
-use embedded_graphics::draw_target::DrawTargetExt;
-use embedded_graphics::mono_font::{MonoTextStyle, MonoTextStyleBuilder};
+use embedded_graphics::draw_target::{DrawTarget, DrawTargetExt};
+use embedded_graphics::mono_font::{MonoFont, MonoTextStyle, MonoTextStyleBuilder};
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Line, PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Baseline, Text};
@@ -34,7 +34,7 @@ use esp_hub75::{Color, Hub75, Hub75Pins16};
 use heapless::String;
 use static_cell::StaticCell;
 
-use crate::model::DisplayState;
+use crate::model::{DisplayState, Element, Layout, UiMode};
 use crate::shared::DISPLAY;
 
 pub const ROWS: usize = 64;
@@ -167,6 +167,10 @@ const OFF: Color = Color::new(0, 0, 0); // fully unlit — LEDs stay dark (e.g. 
 // title needs scrolling; `HOLD_FRAMES` is the pause (~5 s) before and after each round.
 const FRAME_MS: u64 = 50;
 const HOLD_FRAMES: u32 = 100;
+/// Blank space (px) between a marquee's text and its wrapped copy — the same value baked into
+/// every built-in marquee helper (`draw_marquee` etc.), shared by the custom renderer so scrolling
+/// custom text matches the board and the JS simulator (§8.2).
+const MARQUEE_GAP: i32 = 14;
 
 pub type FBType = DmaFrameBuffer<NROWS, COLS, PLANES>;
 type Hub75Type = Hub75<'static, esp_hal::Async>;
@@ -284,6 +288,14 @@ pub async fn render_task(
         let mut frame: u32 = 0;
         let mut pending: Option<DisplayState> = None;
         loop {
+            // Auto-revert an expired live preview before drawing, so the panel returns to the
+            // persisted UI mode + layout even without an explicit `/preview/end` (phone locked,
+            // WiFi dropped, tab closed). `preview_layout()` then reads back `None` for this frame.
+            if let Some(dl) = crate::shared::preview_deadline()
+                && Instant::now() >= dl
+            {
+                crate::shared::end_preview();
+            }
             fb.erase();
             let animating = draw_state(fb, &state, frame);
             tx.signal(fb);
@@ -298,22 +310,29 @@ pub async fn render_task(
                 pending = Some(next);
             }
             if !animating {
-                // A static screen blocks for the next state, but also wakes periodically so it
-                // is redrawn at the current brightness when the day/night threshold is crossed.
-                match select(
-                    Timer::after(Duration::from_secs(BRIGHTNESS_REFRESH_SECS)),
-                    DISPLAY.wait(),
-                )
-                .await
+                // A static screen blocks for the next state, but also wakes periodically so it is
+                // redrawn at the current brightness when the day/night threshold is crossed — and
+                // sooner if a live preview is about to expire (so the deadline check above fires on
+                // time) or a `REDRAW` (a preview push) arrives.
+                let refresh = Instant::now() + Duration::from_secs(BRIGHTNESS_REFRESH_SECS);
+                let wake_at = crate::shared::preview_deadline().map_or(refresh, |d| d.min(refresh));
+                match select3(Timer::at(wake_at), DISPLAY.wait(), crate::shared::REDRAW.wait()).await
                 {
-                    Either::First(_) => {}
-                    Either::Second(next) => state = next,
+                    Either3::First(_) => {}           // refresh / preview deadline → redraw state
+                    Either3::Second(next) => state = next,
+                    Either3::Third(_) => {}           // preview push → redraw the current state
                 }
                 break;
             }
-            match select(Timer::after(Duration::from_millis(FRAME_MS)), DISPLAY.wait()).await {
-                Either::First(_) => frame = frame.wrapping_add(1),
-                Either::Second(next) => {
+            match select3(
+                Timer::after(Duration::from_millis(FRAME_MS)),
+                DISPLAY.wait(),
+                crate::shared::REDRAW.wait(),
+            )
+            .await
+            {
+                Either3::First(_) => frame = frame.wrapping_add(1),
+                Either3::Second(next) => {
                     // Hold the switch until the tram has finished a full pass; cut over
                     // immediately for every other state.
                     if matches!(state, DisplayState::Connecting) && !connect_cycle_done(frame) {
@@ -323,6 +342,7 @@ pub async fn render_task(
                         break;
                     }
                 }
+                Either3::Third(_) => {} // preview push → redraw the current frame with the new mirror
             }
         }
     }
@@ -357,10 +377,28 @@ pub fn draw_state(fb: &mut FBType, state: &DisplayState, frame: u32) -> bool {
         DisplayState::Connecting => draw_connecting(fb, frame),
         DisplayState::IdleAddress { octets } => draw_idle(fb, *octets, frame),
         DisplayState::Departures { station, deps } => {
-            if crate::shared::focus_view_enabled() {
-                draw_focus(fb, station, deps, frame)
+            // A live preview (§4.3) forces the custom path regardless of the persisted UI mode, so
+            // the user can design a Custom layout while the device is still in Default/Focus. An
+            // empty preview falls back to the built-in board, same as an empty saved layout.
+            if let Some(preview) = crate::shared::preview_layout() {
+                if preview.e.is_empty() {
+                    draw_departures(fb, station, deps, frame)
+                } else {
+                    draw_custom_layout(fb, &preview, station, deps, frame)
+                }
             } else {
-                draw_departures(fb, station, deps, frame)
+                match crate::shared::ui_mode() {
+                    UiMode::Focus => draw_focus(fb, station, deps, frame),
+                    UiMode::Default => draw_departures(fb, station, deps, frame),
+                    // Custom draws the user's saved layout; with no (or an empty) layout it falls
+                    // back to the built-in board so the panel is never blank (§7.5).
+                    UiMode::Custom => match crate::shared::custom_layout() {
+                        Some(layout) if !layout.e.is_empty() => {
+                            draw_custom_layout(fb, &layout, station, deps, frame)
+                        }
+                        _ => draw_departures(fb, station, deps, frame),
+                    },
+                }
             }
         }
         DisplayState::Offline => draw_offline(fb, frame),
@@ -812,6 +850,334 @@ fn draw_seg_digit(fb: &mut FBType, x: i32, y: i32, d: u8, c: Color) {
     if on(2) {
         fill_rect(fb, x + w - T, y + h / 2, T, h / 2, c); // c — bottom-right
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// Custom layout renderer (FEATURE_UI_BUILDER §7.5). `draw_custom_layout` walks the user's saved
+// [`Layout`] and dispatches each element on its numeric type tag `t`, reusing the board's
+// primitives. Data-bound elements (station, departure fields) honour the same global config as the
+// built-in board (`line_badges_enabled` / `city`), so a custom board stays in lock-step with
+// Default/Focus. Font upscaling (`k ∈ 1..=3`) goes through [`blit_scaled_text`], which pixel-doubles
+// the font's own glyphs so the panel matches the JS simulator glyph-for-glyph (§8.2). Everything is
+// defensive: out-of-range fields are clamped and a hostile POST can never panic the render task.
+// ---------------------------------------------------------------------------------------
+
+/// Resolve an element's colour: an explicit 24-bit `col` (`0xRRGGBB`) overrides the preset index
+/// `c` (0 = AMBER, 1 = ACCENT, 2 = DIM). The result still passes through `scaled()` at draw time
+/// (via `pset`/`fill_rect`) like every other colour, so custom colours dim with the panel.
+fn elem_color(el: &Element) -> Color {
+    match el.col {
+        Some(rgb) => Color::new((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8),
+        None => match el.c {
+            1 => ACCENT,
+            2 => DIM,
+            _ => AMBER,
+        },
+    }
+}
+
+/// The mono font for an element's `s` selector: `1` = FONT_6X10 (M), anything else = FONT_5X7 (S).
+fn font_for(s: u8) -> &'static MonoFont<'static> {
+    if s == 1 { &FONT_6X10 } else { &FONT_5X7 }
+}
+
+/// A tiny one-bit canvas sized to the largest glyph cell (FONT_6X10 = 6×10). A single glyph is
+/// rendered into it by embedded-graphics' own rasteriser, then [`blit_scaled_text`] pixel-doubles
+/// the lit cells into the framebuffer — reading the real font keeps custom text identical to the
+/// built-in board (and to the simulator). Reading the font atlas via `GetPixel` would be O(atlas)
+/// per pixel; this draws each glyph once instead.
+struct GlyphCanvas {
+    lit: [[bool; 6]; 10],
+}
+
+impl GlyphCanvas {
+    fn new() -> Self {
+        Self { lit: [[false; 6]; 10] }
+    }
+}
+
+impl Dimensions for GlyphCanvas {
+    fn bounding_box(&self) -> Rectangle {
+        Rectangle::new(Point::zero(), Size::new(6, 10))
+    }
+}
+
+impl DrawTarget for GlyphCanvas {
+    type Color = Color;
+    type Error = core::convert::Infallible;
+
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        // The mono-font style draws only lit ("on") pixels in foreground mode, so any pixel that
+        // reaches here belongs to the glyph — the colour value itself is irrelevant.
+        for Pixel(p, _) in pixels {
+            if (0..6).contains(&p.x) && (0..10).contains(&p.y) {
+                self.lit[p.y as usize][p.x as usize] = true;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Draw `text` at baseline-top `(x0, y)` in `font`, upscaled by integer `k` (each source glyph
+/// pixel becomes a `k×k` block), clipped to the horizontal band `[clip_x0, clip_x1)`. Advance per
+/// glyph is `char_w × k`, matching the frozen metrics. Glyphs fully outside the clip are skipped.
+#[allow(clippy::too_many_arguments)] // a layout helper: font, scale, colour and clip band all matter
+fn blit_scaled_text(
+    fb: &mut FBType,
+    text: &str,
+    x0: i32,
+    y: i32,
+    font: &'static MonoFont<'static>,
+    k: i32,
+    color: Color,
+    clip_x0: i32,
+    clip_x1: i32,
+) {
+    let cw = font.character_size.width as i32;
+    let ch = font.character_size.height as i32;
+    let on = MonoTextStyleBuilder::new()
+        .font(font)
+        .text_color(Color::new(0xFF, 0xFF, 0xFF))
+        .build();
+    let mut x = x0;
+    for c in text.chars() {
+        // Only rasterise glyphs that overlap the clip band.
+        if x + cw * k > clip_x0 && x < clip_x1 {
+            let mut canvas = GlyphCanvas::new();
+            let mut buf = [0u8; 4];
+            let s = c.encode_utf8(&mut buf);
+            let _ = Text::with_baseline(s, Point::zero(), on, Baseline::Top).draw(&mut canvas);
+            for gy in 0..ch {
+                for gx in 0..cw {
+                    if canvas.lit[gy as usize][gx as usize] {
+                        for sy in 0..k {
+                            for sx in 0..k {
+                                let px = x + gx * k + sx;
+                                if px >= clip_x0 && px < clip_x1 {
+                                    pset(fb, px, y + gy * k + sy, color);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        x += cw * k;
+    }
+}
+
+/// Draw a text-bearing element's `text` at its own `x,y`, respecting its font `s`, scale `k`,
+/// alignment `a`, colour and box width `w`. If it fits within `w` (or `w == 0`, natural width) it
+/// sits flush, aligned within the box; otherwise, when `allow_marquee`, it scrolls as a marquee
+/// (same cadence as the board) clipped to `[x, x+w)`. Returns `true` while it is scrolling.
+fn place_text(fb: &mut FBType, text: &str, el: &Element, allow_marquee: bool, frame: u32) -> bool {
+    let font = font_for(el.s);
+    let cw = font.character_size.width as i32;
+    let k = (el.k as i32).clamp(1, 3);
+    let x = el.x as i32;
+    let y = el.y as i32;
+    let color = elem_color(el);
+    let text_w = text.chars().count() as i32 * cw * k;
+    let avail = if el.w > 0 { el.w as i32 } else { text_w };
+    let fits = text_w <= avail;
+    if fits || !allow_marquee {
+        // Flush: align within the box when it fits, else pin left and clip (non-marquee overflow).
+        let off = if fits {
+            match el.a {
+                1 => (avail - text_w) / 2,
+                2 => avail - text_w,
+                _ => 0,
+            }
+        } else {
+            0
+        };
+        // Clip to the box only when one is given (`w > 0`); a natural-width element is unbounded.
+        let (c0, c1) = if el.w > 0 { (x, x + avail) } else { (i32::MIN, i32::MAX) };
+        blit_scaled_text(fb, text, x + off, y, font, k, color, c0, c1);
+        false
+    } else {
+        let period = text_w + MARQUEE_GAP;
+        let phase = frame % (HOLD_FRAMES + period as u32);
+        let offset = phase.saturating_sub(HOLD_FRAMES) as i32; // 1 px/frame after the initial hold
+        blit_scaled_text(fb, text, x - offset, y, font, k, color, x, x + avail);
+        blit_scaled_text(fb, text, x - offset + period, y, font, k, color, x, x + avail);
+        true
+    }
+}
+
+/// Render one live **Departure field** (`t=1`): look up the departure at slot `di` (soonest-first)
+/// and draw its `fk` field (badge / direction / time) at the element's own `x,y`. A missing slot
+/// (fewer live departures than `di+1`) draws nothing. Mirrors the built-in board's per-field logic
+/// (badge honours `line_badges_enabled`; direction is city-stripped; time shows the "now" tram
+/// pictogram). Returns `true` while the direction field is mid-scroll.
+fn draw_dep_field(
+    fb: &mut FBType,
+    el: &Element,
+    deps: &[crate::model::Departure],
+    frame: u32,
+) -> bool {
+    let Some(dep) = deps.get((el.di as usize).min(2)) else {
+        return false; // slot absent → draw nothing
+    };
+    let color = elem_color(el);
+    match el.fk {
+        // Badge: a filled badge when line badges are on, else the line as plain (scalable) text.
+        0 => {
+            if crate::shared::line_badges_enabled() {
+                draw_badge(fb, dep.line.as_str(), el.x as i32, el.y as i32, color, OFF);
+                false
+            } else {
+                place_text(fb, dep.line.as_str(), el, true, frame)
+            }
+        }
+        // Direction: the destination, city-stripped, as a marquee clipped to `w`.
+        1 => place_text(fb, city(dep.destination.as_str()), el, true, frame),
+        // Time: the "now" tram pictogram (scaled by `k`) when leaving now, else the `N'`/`--` text.
+        _ => match dep.minutes {
+            Some(0) => {
+                let k = (el.k as i32).clamp(1, 3);
+                draw_train_front_scaled(fb, el.x as i32, el.y as i32, k, color);
+                false
+            }
+            other => {
+                let mins = fmt_minutes(other);
+                place_text(fb, mins.as_str(), el, true, frame)
+            }
+        },
+    }
+}
+
+/// Local civil parts `(year, month, day, hour, minute)` for the clock/date elements, or `None`
+/// before SNTP has synced (the element then draws nothing). Uses the same Swiss-offset + civil-date
+/// helpers as the auto-dim window, so it tracks CET/CEST year-round.
+fn local_parts() -> Option<(i64, u32, u32, u32, u32)> {
+    let unix = crate::shared::now_unix()?;
+    let local = unix + swiss_offset_seconds(unix);
+    let (y, m, d) = civil_from_days(local.div_euclid(86_400));
+    let sod = local.rem_euclid(86_400);
+    Some((y, m, d, (sod / 3600) as u32, (sod % 3600 / 60) as u32))
+}
+
+/// Clock element (`t=3`): the local time, `HH:MM` (`f=0`, zero-padded) or `H:MM` (`f=1`). Static —
+/// never forces animation; it refreshes on the `BRIGHTNESS_REFRESH_SECS` static-screen wake.
+fn draw_clock(fb: &mut FBType, el: &Element) -> bool {
+    let Some((_, _, _, hh, mm)) = local_parts() else {
+        return false;
+    };
+    let mut s: String<16> = String::new();
+    match el.f {
+        1 => {
+            let _ = write!(s, "{}:{:02}", hh, mm);
+        }
+        _ => {
+            let _ = write!(s, "{:02}:{:02}", hh, mm);
+        }
+    }
+    place_text(fb, s.as_str(), el, false, 0)
+}
+
+/// Date element (`t=4`): the local date, `DD.MM.` (`f=0`) or `DD.MM.YYYY` (`f=1`). Static.
+fn draw_date(fb: &mut FBType, el: &Element) -> bool {
+    let Some((y, m, d, _, _)) = local_parts() else {
+        return false;
+    };
+    let mut s: String<16> = String::new();
+    match el.f {
+        1 => {
+            let _ = write!(s, "{:02}.{:02}.{}", d, m, y);
+        }
+        _ => {
+            let _ = write!(s, "{:02}.{:02}.", d, m);
+        }
+    }
+    place_text(fb, s.as_str(), el, false, 0)
+}
+
+/// Divider element (`t=5`): a horizontal bar at `y`, length `w` (or to the panel edge when `w=0`),
+/// thickness `th` (1..=2). Uses `fill_rect`, which clips to the panel and scales the colour.
+fn draw_divider(fb: &mut FBType, el: &Element) {
+    let len = if el.w > 0 { el.w as i32 } else { COLS as i32 - el.x as i32 };
+    let th = (el.th as i32).clamp(1, 2);
+    fill_rect(fb, el.x as i32, el.y as i32, len, th, elem_color(el));
+}
+
+// Icon glyphs for `t=6`. The tram-front reuses [`draw_train_front_scaled`]; the Z-blind and arrow
+// are small bitmaps pixel-doubled by `k` (the Z matches the connecting-animation route blind).
+const Z_GLYPH: [[u8; 3]; 5] = [[1, 1, 1], [0, 0, 1], [0, 1, 0], [1, 0, 0], [1, 1, 1]];
+const ARROW_GLYPH: [[u8; 7]; 5] = [
+    [0, 0, 0, 0, 1, 0, 0],
+    [0, 0, 0, 0, 0, 1, 0],
+    [1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 1, 0],
+    [0, 0, 0, 0, 1, 0, 0],
+];
+
+/// Blit a small bitmap glyph with its top-left at `(x, y)`, each lit cell drawn as a `k×k` block.
+fn blit_bitmap<const W: usize, const H: usize>(
+    fb: &mut FBType,
+    glyph: &[[u8; W]; H],
+    x: i32,
+    y: i32,
+    k: i32,
+    color: Color,
+) {
+    for (gy, row) in glyph.iter().enumerate() {
+        for (gx, &on) in row.iter().enumerate() {
+            if on == 1 {
+                for sy in 0..k {
+                    for sx in 0..k {
+                        pset(fb, x + gx as i32 * k + sx, y + gy as i32 * k + sy, color);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Icon element (`t=6`): glyph `g` (0 = tram-front, 1 = Z-blind, 2 = arrow), scaled by `k`.
+fn draw_icon(fb: &mut FBType, el: &Element) {
+    let k = (el.k as i32).clamp(1, 3);
+    let (x, y, color) = (el.x as i32, el.y as i32, elem_color(el));
+    match el.g {
+        1 => blit_bitmap(fb, &Z_GLYPH, x, y, k, color),
+        2 => blit_bitmap(fb, &ARROW_GLYPH, x, y, k, color),
+        _ => draw_train_front_scaled(fb, x, y, k, color),
+    }
+}
+
+/// Render the user's custom layout: iterate elements in draw order (later = on top) and dispatch on
+/// the numeric type tag `t`. Returns `true` while any element is mid-marquee so the render loop
+/// keeps ticking frames. An unknown `t` is ignored (forward-compat, §5.5).
+fn draw_custom_layout(
+    fb: &mut FBType,
+    layout: &Layout,
+    station: &str,
+    deps: &[crate::model::Departure],
+    frame: u32,
+) -> bool {
+    let mut animating = false;
+    for el in layout.e.iter() {
+        animating |= match el.t {
+            0 => place_text(fb, el.v.as_str(), el, true, frame), // static Text
+            1 => draw_dep_field(fb, el, deps, frame),            // live Departure field
+            2 => place_text(fb, city(station), el, true, frame), // Station name
+            3 => draw_clock(fb, el),                             // Clock
+            4 => draw_date(fb, el),                              // Date
+            5 => {
+                draw_divider(fb, el); // Divider
+                false
+            }
+            6 => {
+                draw_icon(fb, el); // Icon
+                false
+            }
+            _ => false, // unknown type: ignore
+        };
+    }
+    animating
 }
 
 /// Like [`draw_marquee`], but the text is clipped to the band `[x0, x0+avail) × [clip_top,

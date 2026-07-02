@@ -17,7 +17,7 @@ use esp_storage::FlashStorage;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Config, Selection, WifiCreds};
+use crate::model::{Config, Layout, Selection, WifiCreds};
 
 const SECTOR: u32 = FlashStorage::SECTOR_SIZE; // 4096
 // Both records live in ONE sector at the start of the nvs partition. An earlier design put
@@ -26,10 +26,11 @@ const SECTOR: u32 = FlashStorage::SECTOR_SIZE; // 4096
 // to round-trip (WiFi survived reboots), so we keep everything here and read-modify-write.
 const STORE_SECTOR: u32 = 0;
 const MAGIC: u32 = 0x5A47_4C32; // "ZGL2" — bumped; old single-record format is ignored
-// Big enough for the largest record: a [`Selection`] tracking the full `MAX_CONNS` connections
-// (each up to line 16 + category 12 + destination 48 chars) plus the WiFi creds and config, all
-// JSON-encoded. Worst case is ~900 bytes; 1024 leaves headroom and still fits one 4096-B sector.
-const MAX_PAYLOAD: usize = 1024;
+// Big enough for the largest record: the existing state (a [`Selection`] tracking the full
+// `MAX_CONNS` connections + WiFi creds + config, ~900 B) **plus** a custom [`Layout`] capped at
+// `model::LAYOUT_MAX_BYTES` (~1.5 KB). Worst case ~2.4 KB, so 3072 leaves headroom and still fits
+// well under one 4096-B sector's usable `4096 − 8 = 4088` B (FEATURE_UI_BUILDER §6 pt. 1).
+const MAX_PAYLOAD: usize = 3072;
 
 /// Everything persisted, as one record so all fields survive independent updates. `config` is
 /// `#[serde(default)]` so records written before it existed still load (it just defaults).
@@ -39,6 +40,10 @@ struct Persisted {
     selection: Option<Selection>,
     #[serde(default)]
     config: Config,
+    /// The user's custom board layout, or `None` when none is saved. `#[serde(default)]` so records
+    /// written before this field existed still load (they just have no layout).
+    #[serde(default)]
+    layout: Option<Layout>,
 }
 
 /// Globally shared flash store, initialised once at boot via [`init`].
@@ -108,8 +113,10 @@ impl Store {
             return None;
         }
         // Decode any `\uXXXX` escapes (e.g. `ü`) so the loaded value matches what was saved;
-        // plain `from_slice` would leave them literal. Buffer fits the longest field value.
-        let mut unescape = [0u8; 96];
+        // plain `from_slice` would leave them literal. Sized for the longest field value: a
+        // `String<24>` Text literal of all-accented chars escapes to 24×6 = 144 B, so 256 B has
+        // margin (FEATURE_UI_BUILDER §6 pt. 4).
+        let mut unescape = [0u8; 256];
         match serde_json_core::from_slice_escaped::<T>(&scratch[..len], &mut unescape) {
             Ok((v, _)) => Some(v),
             Err(e) => {
@@ -196,12 +203,26 @@ impl Store {
     }
 
     pub fn load_config(&mut self) -> Config {
-        self.read_all().config
+        let mut cfg = self.read_all().config;
+        cfg.migrate(); // fold a legacy `focusView:true` record into `uiMode = 1`
+        cfg
     }
 
     pub fn save_config(&mut self, cfg: &Config) -> Result<(), ()> {
         let mut all = self.read_all();
         all.config = *cfg;
+        self.write_all(&all)
+    }
+
+    pub fn load_layout(&mut self) -> Option<Layout> {
+        self.read_all().layout
+    }
+
+    /// Persist the custom layout, or clear it when `layout` is `None` (an empty layout is stored as
+    /// `None` by the caller so a saved-but-empty layout and no layout are the same on disk).
+    pub fn save_layout(&mut self, layout: Option<&Layout>) -> Result<(), ()> {
+        let mut all = self.read_all();
+        all.layout = layout.cloned();
         self.write_all(&all)
     }
 }

@@ -1,4 +1,5 @@
 #![no_std]
+#![feature(allocator_api)]
 //! Zügli firmware library crate.
 //!
 //! The firmware is `no_std` embedded Rust on the ESP32-S3, async via Embassy. It drives a

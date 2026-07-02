@@ -154,6 +154,153 @@
   .group-sub{margin:0 0 6px 10px;padding-left:16px;border-left:2px solid var(--accent);}
   .group-sub .opt{padding-top:12px;padding-bottom:12px;}
   .group-sub .opt + .opt{border-top:1px solid #241d16;}
+
+  /* LED panel simulator (M4 presentation layer). The bezel is the physical panel frame:
+     near-black (not pure #000) so the unlit LED grid inside still reads as a surface. The
+     canvas draws one round dot per LED; sizing is done in JS so 1 canvas px = 1 device px. */
+  .sim-bezel{background:#0a0a0a;border-radius:14px;padding:12px;margin:10px 0 4px;}
+  .sim-canvas{display:block;width:100%;max-width:448px;aspect-ratio:1/1;height:auto;margin:0 auto;background:#0a0a0a;}
+  /* Dev harness close button needs the full 44px target (the settings one predates that rule). */
+  #simdemo .sheet-close{min-width:44px;min-height:44px;}
+
+  /* ---------- M5 UI builder: board-view selector + entry card (main page) ---------- */
+  /* Secondary entry into the editor: surface card with copper title, visually lighter than the
+     primary Save button. The thumbnail canvas is a miniature of the bezel. */
+  .entry{
+    display:flex;align-items:center;gap:14px;width:100%;
+    background:var(--surface);border:1.5px solid #2a2119;border-radius:14px;
+    padding:12px 14px;margin-top:10px;cursor:pointer;font-family:inherit;text-align:left;
+  }
+  .entry:active{border-color:var(--accent);}
+  .entry-thumb{flex:none;width:64px;height:64px;border-radius:8px;background:#0a0a0a;display:block;}
+  .entry-text{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1;}
+  .entry-title{color:var(--accent);font-weight:600;font-size:16px;}
+  .entry-sub{font-size:13px;color:var(--muted);}
+  .entry-chev{color:var(--muted);font-size:22px;line-height:1;}
+
+  /* ---------- M5 UI builder: full-screen layout editor ---------- */
+  body.ed-lock{overflow:hidden;}
+  .editor{
+    position:fixed;inset:0;z-index:40;background:var(--bg);
+    display:flex;flex-direction:column;
+    padding-top:env(safe-area-inset-top);
+  }
+  @media (prefers-reduced-motion: no-preference){
+    .editor{animation:ed-in .22s ease-out;}
+    #ed-props,#ed-palette{animation:dock-in .18s ease-out;}
+  }
+  @keyframes ed-in{from{transform:translateY(4%);opacity:0;}to{transform:none;opacity:1;}}
+  @keyframes dock-in{from{transform:translateY(6px);opacity:0;}to{transform:none;opacity:1;}}
+  .ed-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;}
+  .ed-cancel{
+    flex:none;width:44px;height:44px;background:none;border:none;border-radius:12px;
+    color:var(--muted);font-size:26px;line-height:1;cursor:pointer;
+  }
+  .ed-cancel:active{background:var(--surface);}
+  .ed-title{flex:1;text-align:center;font-size:17px;font-weight:600;color:var(--cream);}
+  .ed-save{
+    flex:none;min-height:44px;padding:0 20px;border:none;border-radius:12px;
+    background:var(--accent);color:var(--surface);font-family:inherit;font-size:16px;font-weight:600;cursor:pointer;
+  }
+  .ed-save[disabled]{opacity:.45;cursor:default;}
+  .ed-note{margin:0;padding:2px 20px 6px;font-size:14px;text-align:center;}
+  .ed-body{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:4px 16px 12px;overflow:hidden;}
+  .ed-bezel{background:#0a0a0a;border-radius:14px;padding:10px;width:min(100%,384px);}
+  @media (max-height:660px){ .ed-bezel{width:min(100%,300px);} }
+  .ed-stage{position:relative;width:100%;aspect-ratio:1/1;touch-action:none;}
+  .ed-stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block;}
+  .ed-empty{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    margin:0;padding:24px;text-align:center;color:var(--muted);font-size:14px;pointer-events:none;
+  }
+  /* Bottom dock: palette of add-chips when nothing is selected, properties sheet otherwise. */
+  .ed-dock{
+    background:var(--surface);border-radius:18px 18px 0 0;
+    padding:12px 16px calc(14px + env(safe-area-inset-bottom));
+    max-height:46dvh;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    box-shadow:0 -8px 30px rgba(0,0,0,.4);
+  }
+  .ed-chips{display:flex;gap:8px;overflow-x:auto;padding:2px;scrollbar-width:none;}
+  .ed-chips::-webkit-scrollbar{display:none;}
+  .ed-chip{
+    flex:none;min-height:44px;padding:0 16px;border-radius:12px;
+    background:#1a1510;color:var(--cream);border:1px solid #2a2119;
+    font-family:inherit;font-size:15px;font-weight:500;cursor:pointer;
+  }
+  .ed-chip:disabled{opacity:.35;cursor:default;}
+  .ed-chip .plus{color:var(--accent);font-weight:600;margin-right:5px;}
+  .ed-clear{
+    width:100%;margin-top:10px;min-height:44px;background:none;border:none;
+    color:#e08a5a;font-family:inherit;font-size:15px;font-weight:500;cursor:pointer;
+  }
+  .ed-clear:disabled{opacity:.35;cursor:default;}
+  .ed-props-head{display:flex;align-items:center;gap:4px;}
+  .ed-back{
+    flex:none;width:44px;height:44px;background:none;border:none;border-radius:12px;
+    color:var(--muted);font-size:26px;line-height:1;cursor:pointer;
+  }
+  .ed-props-title{flex:1;font-size:16px;font-weight:600;color:var(--cream);}
+  .ed-del{
+    flex:none;width:44px;height:44px;display:flex;align-items:center;justify-content:center;
+    background:none;border:none;border-radius:12px;color:#e08a5a;cursor:pointer;
+  }
+  .ed-del svg{width:20px;height:20px;fill:currentColor;}
+  .prow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid #241d16;}
+  .prow-col{flex-direction:column;align-items:stretch;gap:8px;}
+  .plabel{font-size:14px;color:var(--cream);}
+  .plabel-wrap{display:flex;flex-direction:column;gap:2px;min-width:0;}
+  .psub{font-size:12px;color:var(--muted);}
+  .ptext{
+    flex:1;min-width:0;max-width:240px;min-height:44px;background:var(--cream);color:#1a1410;
+    border:none;border-radius:10px;padding:0 12px;font-family:inherit;font-size:16px;outline:none;
+  }
+  .seg{display:flex;gap:4px;background:#1a1510;border-radius:12px;padding:3px;}
+  .seg button{
+    min-width:44px;min-height:44px;padding:0 10px;background:transparent;border:none;border-radius:9px;
+    color:var(--muted);font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;
+  }
+  .seg button.on{background:var(--selected);color:var(--accent);}
+  /* Colour swatches use the real panel palette (filled in from ZugliPanel in JS). */
+  .swatches{display:flex;gap:10px;}
+  .sw{
+    position:relative;width:44px;height:44px;border-radius:12px;border:2px solid transparent;
+    padding:0;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(245,239,230,.12);
+  }
+  .sw.on{border-color:var(--cream);}
+  .sw-custom{display:block;background:conic-gradient(#b87648,#caa04a,#7d9a58,#5b7f96,#8a6a9c,#b87648);}
+  .sw-custom input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;}
+  .ed-secondary{
+    width:100%;min-height:44px;background:#1a1510;border:1px solid #2a2119;border-radius:10px;
+    color:var(--accent);font-family:inherit;font-size:15px;font-weight:500;cursor:pointer;
+  }
+  .nudge{display:flex;align-items:center;gap:6px;}
+  .nudge button{
+    width:44px;height:44px;border-radius:10px;background:#1a1510;color:var(--cream);
+    border:1px solid #2a2119;font-family:inherit;font-size:20px;cursor:pointer;
+  }
+  .nudge button:active{background:var(--selected);color:var(--accent);}
+  .nudge input{
+    width:58px;height:44px;text-align:center;background:var(--cream);color:#1a1410;
+    border:none;border-radius:10px;font-family:inherit;font-size:16px;font-weight:600;
+    -moz-appearance:textfield;
+  }
+  .nudge input::-webkit-outer-spin-button,.nudge input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+  /* Small centred confirm for destructive/one-way editor actions (discard, delete trio, split, clear). */
+  .ed-confirm{
+    position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.55);
+    display:flex;align-items:center;justify-content:center;padding:24px;
+  }
+  .ed-confirm-box{
+    width:100%;max-width:320px;background:var(--bg);border-radius:16px;padding:20px;
+    box-shadow:0 10px 40px rgba(0,0,0,.5);
+  }
+  .ed-confirm-box p{margin:0 0 16px;font-size:15px;color:var(--cream);}
+  .ed-confirm-btns{display:flex;gap:10px;}
+  .ed-confirm-btns button{
+    flex:1;min-height:44px;border-radius:10px;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;
+  }
+  #ed-confirm-no{background:#1a1510;color:var(--cream);border:1px solid #2a2119;}
+  #ed-confirm-yes{background:var(--accent);color:var(--surface);border:none;}
 </style>
 </head>
 <body>
@@ -185,17 +332,6 @@
       </span>
       <span class="switch">
         <input type="checkbox" id="opt-badges">
-        <span class="slider"></span>
-      </span>
-    </label>
-
-    <label class="opt" for="opt-focus">
-      <span class="opt-text">
-        <span class="opt-title">Single-departure view</span>
-        <span class="opt-sub muted">Focus on the next departure with a big countdown, instead of the three-departure board.</span>
-      </span>
-      <span class="switch">
-        <input type="checkbox" id="opt-focus">
         <span class="slider"></span>
       </span>
     </label>
@@ -285,7 +421,477 @@
     <button class="btn" id="save">Save to Zügli</button>
     <p class="note hidden" id="status"></p>
   </div>
+
+  <!-- M5: which view the board shows — the built-in three-row board, the focus view, or the
+       user's own layout. Mirrors cfg.uiMode; tapping Custom with no saved layout opens the
+       editor instead (Custom only becomes active once a layout is saved). -->
+  <h2>Board view</h2>
+  <div class="mode" role="tablist" aria-label="Board view">
+    <button class="mode-opt active" id="ui-mode-0" role="tab" aria-selected="true">
+      <span class="mt">Default</span>
+      <span class="ms">Three departures</span>
+    </button>
+    <button class="mode-opt" id="ui-mode-1" role="tab" aria-selected="false">
+      <span class="mt">Focus</span>
+      <span class="ms">Next departure</span>
+    </button>
+    <button class="mode-opt" id="ui-mode-2" role="tab" aria-selected="false">
+      <span class="mt">Custom</span>
+      <span class="ms">Your design</span>
+    </button>
+  </div>
+  <button class="entry" id="open-editor">
+    <canvas class="entry-thumb" id="entry-thumb" width="64" height="64" aria-hidden="true"></canvas>
+    <span class="entry-text">
+      <span class="entry-title">Design your board</span>
+      <span class="entry-sub" id="entry-sub">No custom layout yet</span>
+    </span>
+    <span class="entry-chev" aria-hidden="true">&rsaquo;</span>
+  </button>
+  <p class="note hidden" id="ui-status"></p>
 </div>
+
+<!-- DEV harness (M4, temporary; replaced by the M5 editor): open the page with the #simdemo hash to reveal a running
+     simulator with the M2 test layout and sample departures, for side-by-side verification
+     against the physical panel. Hidden in normal use; a later milestone replaces this. -->
+<div id="simdemo" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="simdemo-title">
+  <div class="sheet">
+    <div class="sheet-head">
+      <h2 id="simdemo-title">Simulator preview</h2>
+      <button id="simdemo-close" class="sheet-close" aria-label="Close">&times;</button>
+    </div>
+    <p class="note muted" style="margin-top:0;">Dev harness. M2 test layout with sample departures, rendered exactly as the panel draws it.</p>
+    <div class="sim-bezel">
+      <canvas id="simdemo-canvas" class="sim-canvas" width="448" height="448" role="img"
+              aria-label="Simulated 64 by 64 LED departure board"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================================
+     M5 UI-builder EDITOR — full-screen visual layout editor (markup only; all logic
+     lives in the #ui-builder script at the bottom of the page). The stage stacks the
+     live simulator canvas, a grid/selection overlay canvas and the empty-state hint.
+     The dock below swaps between the add-palette and the properties sheet.
+     ================================================================================ -->
+<div id="editor" class="editor hidden" role="dialog" aria-modal="true" aria-labelledby="ed-title">
+  <div class="ed-bar">
+    <button id="ed-cancel" class="ed-cancel" aria-label="Cancel">&times;</button>
+    <span class="ed-title" id="ed-title">Board layout</span>
+    <button id="ed-save" class="ed-save" disabled>Save</button>
+  </div>
+  <p class="note ed-note hidden" id="ed-status"></p>
+  <div class="ed-body">
+    <div class="ed-bezel">
+      <div class="ed-stage" id="ed-stage">
+        <canvas id="ed-canvas" role="img" aria-label="Live preview of the 64 by 64 LED board"></canvas>
+        <canvas id="ed-overlay" aria-hidden="true"></canvas>
+        <p class="ed-empty hidden" id="ed-empty">Tap + to add your first element.</p>
+      </div>
+    </div>
+  </div>
+  <div class="ed-dock">
+    <div id="ed-palette">
+      <div class="ed-chips" id="ed-chips">
+        <button class="ed-chip" data-add="text"><span class="plus">+</span>Text</button>
+        <button class="ed-chip" data-add="departure"><span class="plus">+</span>Departure</button>
+        <button class="ed-chip" data-add="clock"><span class="plus">+</span>Clock</button>
+        <button class="ed-chip" data-add="date"><span class="plus">+</span>Date</button>
+        <button class="ed-chip" data-add="station"><span class="plus">+</span>Station</button>
+        <button class="ed-chip" data-add="divider"><span class="plus">+</span>Divider</button>
+        <button class="ed-chip" data-add="icon"><span class="plus">+</span>Icon</button>
+      </div>
+      <p class="note muted hidden" id="ed-full">Layout full — remove an element to add more.</p>
+      <button class="ed-clear" id="ed-clear">Clear custom layout</button>
+    </div>
+    <div id="ed-props" class="hidden">
+      <div class="ed-props-head">
+        <button class="ed-back" id="ed-back" aria-label="Back to elements">&lsaquo;</button>
+        <span class="ed-props-title" id="ed-props-title"></span>
+        <button class="ed-del" id="ed-del" aria-label="Delete element">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-3 6h12l-.9 11.1a2 2 0 0 1-2 1.9H8.9a2 2 0 0 1-2-1.9L6 9Zm4 2v9h1.5v-9H10Zm3.5 0v9H15v-9h-1.5Z"/></svg>
+        </button>
+      </div>
+      <div class="prow" id="pr-text">
+        <label class="plabel" for="ed-text">Text</label>
+        <input class="ptext" id="ed-text" type="text" maxlength="24" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="prow prow-col" id="pr-colour">
+        <span class="plabel">Colour</span>
+        <div class="swatches">
+          <button class="sw" data-c="0" aria-label="Amber"></button>
+          <button class="sw" data-c="1" aria-label="Copper"></button>
+          <button class="sw" data-c="2" aria-label="Dim"></button>
+          <label class="sw sw-custom" aria-label="Custom colour">
+            <input type="color" id="ed-colinput">
+          </label>
+        </div>
+        <span class="psub">Colours may look brighter or washed on the panel.</span>
+      </div>
+      <div class="prow" id="pr-align">
+        <span class="plabel">Align</span>
+        <span class="seg" id="seg-align">
+          <button data-v="0" aria-label="Align left">L</button>
+          <button data-v="1" aria-label="Align centre">C</button>
+          <button data-v="2" aria-label="Align right">R</button>
+        </span>
+      </div>
+      <div class="prow" id="pr-font">
+        <span class="plabel">Font</span>
+        <span class="seg" id="seg-font">
+          <button data-v="0" aria-label="Small font">S</button>
+          <button data-v="1" aria-label="Medium font">M</button>
+        </span>
+      </div>
+      <div class="prow" id="pr-scale">
+        <span class="plabel">Scale</span>
+        <span class="seg" id="seg-scale">
+          <button data-v="1">1&times;</button>
+          <button data-v="2">2&times;</button>
+          <button data-v="3">3&times;</button>
+        </span>
+      </div>
+      <div class="prow" id="pr-format">
+        <span class="plabel">Format</span>
+        <span class="seg" id="seg-format">
+          <button data-v="0" id="ed-f0"></button>
+          <button data-v="1" id="ed-f1"></button>
+        </span>
+      </div>
+      <div class="prow" id="pr-glyph">
+        <span class="plabel">Symbol</span>
+        <span class="seg" id="seg-glyph">
+          <button data-v="0">Tram</button>
+          <button data-v="1">Z</button>
+          <button data-v="2">Arrow</button>
+        </span>
+      </div>
+      <div class="prow" id="pr-th">
+        <span class="plabel">Thickness</span>
+        <span class="seg" id="seg-th">
+          <button data-v="1">1 px</button>
+          <button data-v="2">2 px</button>
+        </span>
+      </div>
+      <div class="prow" id="pr-x">
+        <span class="plabel">X</span>
+        <span class="nudge">
+          <button data-nudge="x" data-d="-1" aria-label="Move left one LED">&minus;</button>
+          <input id="ed-x" type="number" inputmode="numeric" min="0" max="63" aria-label="X position">
+          <button data-nudge="x" data-d="1" aria-label="Move right one LED">+</button>
+        </span>
+      </div>
+      <div class="prow" id="pr-y">
+        <span class="plabel">Y</span>
+        <span class="nudge">
+          <button data-nudge="y" data-d="-1" aria-label="Move up one LED">&minus;</button>
+          <input id="ed-y" type="number" inputmode="numeric" min="0" max="63" aria-label="Y position">
+          <button data-nudge="y" data-d="1" aria-label="Move down one LED">+</button>
+        </span>
+      </div>
+      <div class="prow" id="pr-w">
+        <span class="plabel-wrap">
+          <span class="plabel" id="pl-w">Width</span>
+          <span class="psub" id="ps-w">0 = fit the text</span>
+        </span>
+        <span class="nudge">
+          <button data-nudge="w" data-d="-1" aria-label="Narrower by one LED">&minus;</button>
+          <input id="ed-w" type="number" inputmode="numeric" min="0" max="64" aria-label="Width">
+          <button data-nudge="w" data-d="1" aria-label="Wider by one LED">+</button>
+        </span>
+      </div>
+      <div class="prow prow-col hidden" id="pr-split">
+        <button class="ed-secondary" id="ed-split">Split into separate fields</button>
+        <span class="psub">Badge, direction and time then move on their own. This can't be undone.</span>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="ed-confirm" class="ed-confirm hidden" role="alertdialog" aria-modal="true" aria-describedby="ed-confirm-msg">
+  <div class="ed-confirm-box">
+    <p id="ed-confirm-msg"></p>
+    <div class="ed-confirm-btns">
+      <button id="ed-confirm-no">Keep editing</button>
+      <button id="ed-confirm-yes">Discard</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================================
+     Zügli panel render ENGINE (M4) — Opus-owned, parity-critical. A JS port of the
+     firmware renderer (firmware/src/display.rs) so the on-screen simulator matches the
+     LED panel glyph-for-glyph. FONTS is auto-generated from embedded-graphics.
+     Presentation code (canvas/animation/thumbnail) consumes window.ZugliPanel.renderLayout
+     and MUST NOT modify anything in this block.
+     ================================================================================ -->
+<script id="panel-engine">
+"use strict";
+// AUTO-GENERATED by fontgen (embedded-graphics 0.8.2 iso_8859_1). Do not edit by hand.
+// Glyph = H integers; bit x of row y (1<<x) lit iff pixel on. adv = per-char advance.
+const FONTS = {
+  "5x7": { w:5, h:7, adv:5, def:[4, 10, 8, 4, 0, 4, 0], g:{ 32:[0, 0, 0, 0, 0, 0, 0], 33:[4, 4, 4, 4, 0, 4, 0], 34:[10, 10, 10, 0, 0, 0, 0], 35:[0, 10, 31, 10, 31, 10, 0], 36:[0, 14, 5, 14, 20, 14, 0], 37:[1, 9, 4, 2, 9, 8, 0], 38:[0, 2, 5, 2, 5, 10, 0], 39:[4, 4, 4, 0, 0, 0, 0], 40:[4, 2, 2, 2, 2, 4, 0], 41:[2, 4, 4, 4, 4, 2, 0], 42:[0, 10, 4, 14, 4, 10, 0], 43:[0, 4, 4, 31, 4, 4, 0], 44:[0, 0, 0, 0, 12, 4, 2], 45:[0, 0, 0, 15, 0, 0, 0], 46:[0, 0, 0, 0, 6, 6, 0], 47:[0, 8, 4, 2, 1, 0, 0], 48:[4, 10, 10, 10, 10, 4, 0], 49:[4, 6, 4, 4, 4, 14, 0], 50:[6, 9, 8, 4, 2, 15, 0], 51:[15, 8, 6, 8, 9, 6, 0], 52:[4, 6, 5, 15, 4, 4, 0], 53:[15, 1, 7, 8, 9, 6, 0], 54:[6, 1, 7, 9, 9, 6, 0], 55:[15, 8, 4, 4, 2, 2, 0], 56:[6, 9, 6, 9, 9, 6, 0], 57:[6, 9, 9, 14, 8, 6, 0], 58:[0, 6, 6, 0, 6, 6, 0], 59:[0, 6, 6, 0, 6, 2, 1], 60:[0, 8, 4, 2, 4, 8, 0], 61:[0, 0, 15, 0, 15, 0, 0], 62:[0, 2, 4, 8, 4, 2, 0], 63:[4, 10, 8, 4, 0, 4, 0], 64:[6, 9, 13, 13, 1, 6, 0], 65:[6, 9, 9, 15, 9, 9, 0], 66:[7, 9, 7, 9, 9, 7, 0], 67:[6, 9, 1, 1, 9, 6, 0], 68:[7, 9, 9, 9, 9, 7, 0], 69:[15, 1, 7, 1, 1, 15, 0], 70:[15, 1, 7, 1, 1, 1, 0], 71:[6, 9, 1, 13, 9, 14, 0], 72:[9, 9, 15, 9, 9, 9, 0], 73:[14, 4, 4, 4, 4, 14, 0], 74:[8, 8, 8, 8, 9, 6, 0], 75:[9, 5, 3, 3, 5, 9, 0], 76:[1, 1, 1, 1, 1, 15, 0], 77:[9, 15, 15, 9, 9, 9, 0], 78:[9, 11, 11, 13, 13, 9, 0], 79:[6, 9, 9, 9, 9, 6, 0], 80:[7, 9, 9, 7, 1, 1, 0], 81:[6, 9, 9, 9, 11, 6, 8], 82:[7, 9, 9, 7, 5, 9, 0], 83:[6, 9, 2, 4, 9, 6, 0], 84:[14, 4, 4, 4, 4, 4, 0], 85:[9, 9, 9, 9, 9, 6, 0], 86:[9, 9, 9, 9, 6, 6, 0], 87:[9, 9, 9, 15, 15, 9, 0], 88:[9, 9, 6, 6, 9, 9, 0], 89:[10, 10, 10, 4, 4, 4, 0], 90:[15, 8, 4, 2, 1, 15, 0], 91:[14, 2, 2, 2, 2, 14, 0], 92:[0, 1, 2, 4, 8, 0, 0], 93:[14, 8, 8, 8, 8, 14, 0], 94:[4, 10, 0, 0, 0, 0, 0], 95:[0, 0, 0, 0, 0, 15, 0], 96:[2, 4, 0, 0, 0, 0, 0], 97:[0, 0, 14, 9, 13, 10, 0], 98:[1, 1, 7, 9, 9, 7, 0], 99:[0, 0, 6, 1, 1, 6, 0], 100:[8, 8, 14, 9, 9, 14, 0], 101:[0, 0, 6, 13, 3, 6, 0], 102:[4, 10, 2, 7, 2, 2, 0], 103:[0, 0, 14, 9, 6, 1, 14], 104:[1, 1, 7, 9, 9, 9, 0], 105:[4, 0, 6, 4, 4, 14, 0], 106:[8, 0, 8, 8, 8, 10, 4], 107:[1, 1, 5, 3, 5, 9, 0], 108:[6, 4, 4, 4, 4, 14, 0], 109:[0, 0, 5, 15, 9, 9, 0], 110:[0, 0, 7, 9, 9, 9, 0], 111:[0, 0, 6, 9, 9, 6, 0], 112:[0, 0, 7, 9, 9, 7, 1], 113:[0, 0, 14, 9, 9, 14, 8], 114:[0, 0, 7, 9, 1, 1, 0], 115:[0, 0, 14, 3, 12, 7, 0], 116:[2, 2, 7, 2, 2, 12, 0], 117:[0, 0, 9, 9, 9, 14, 0], 118:[0, 0, 10, 10, 10, 4, 0], 119:[0, 0, 9, 9, 15, 15, 0], 120:[0, 0, 9, 6, 6, 9, 0], 121:[0, 0, 9, 9, 10, 4, 2], 122:[0, 0, 15, 4, 2, 15, 0], 123:[8, 4, 6, 4, 4, 8, 0], 124:[4, 4, 4, 4, 4, 4, 0], 125:[2, 4, 12, 4, 4, 2, 0], 126:[10, 5, 0, 0, 0, 0, 0], 160:[0, 0, 0, 0, 0, 0, 0], 161:[4, 0, 4, 4, 4, 4, 0], 162:[0, 4, 14, 5, 5, 14, 4], 163:[0, 12, 2, 7, 2, 13, 0], 164:[0, 17, 14, 10, 14, 17, 0], 165:[10, 10, 4, 14, 4, 4, 0], 166:[0, 4, 4, 0, 4, 4, 0], 167:[12, 2, 6, 10, 12, 8, 6], 168:[10, 0, 0, 0, 0, 0, 0], 169:[14, 17, 21, 19, 21, 17, 14], 170:[6, 5, 6, 0, 0, 0, 0], 171:[0, 0, 18, 9, 18, 0, 0], 172:[0, 0, 0, 15, 8, 0, 0], 173:[0, 0, 0, 14, 0, 0, 0], 174:[14, 17, 23, 19, 19, 17, 14], 175:[15, 0, 0, 0, 0, 0, 0], 176:[4, 10, 4, 0, 0, 0, 0], 177:[4, 4, 31, 4, 4, 31, 0], 178:[6, 4, 2, 6, 0, 0, 0], 179:[6, 6, 4, 6, 0, 0, 0], 180:[4, 2, 0, 0, 0, 0, 0], 181:[0, 0, 9, 9, 9, 7, 1], 182:[14, 11, 11, 10, 10, 10, 0], 183:[0, 0, 6, 6, 0, 0, 0], 184:[0, 0, 0, 0, 0, 4, 2], 185:[4, 6, 4, 14, 0, 0, 0], 186:[2, 5, 2, 0, 0, 0, 0], 187:[0, 0, 9, 18, 9, 0, 0], 188:[1, 1, 1, 9, 12, 14, 8], 189:[1, 1, 1, 13, 8, 4, 12], 190:[3, 3, 2, 11, 12, 14, 8], 191:[4, 0, 4, 2, 10, 4, 0], 192:[6, 9, 9, 15, 9, 9, 0], 193:[6, 9, 9, 15, 9, 9, 0], 194:[6, 9, 9, 15, 9, 9, 0], 195:[6, 9, 9, 15, 9, 9, 0], 196:[9, 6, 9, 15, 9, 9, 0], 197:[6, 6, 9, 15, 9, 9, 0], 198:[14, 5, 13, 7, 5, 13, 0], 199:[6, 9, 1, 1, 9, 6, 2], 200:[15, 1, 7, 1, 1, 15, 0], 201:[15, 1, 7, 1, 1, 15, 0], 202:[15, 1, 7, 1, 1, 15, 0], 203:[15, 1, 7, 1, 1, 15, 0], 204:[14, 4, 4, 4, 4, 14, 0], 205:[14, 4, 4, 4, 4, 14, 0], 206:[14, 4, 4, 4, 4, 14, 0], 207:[14, 4, 4, 4, 4, 14, 0], 208:[7, 10, 11, 10, 10, 7, 0], 209:[13, 9, 11, 13, 13, 9, 0], 210:[6, 9, 9, 9, 9, 6, 0], 211:[6, 9, 9, 9, 9, 6, 0], 212:[6, 9, 9, 9, 9, 6, 0], 213:[6, 9, 9, 9, 9, 6, 0], 214:[9, 6, 9, 9, 9, 6, 0], 215:[0, 0, 9, 6, 6, 9, 0], 216:[14, 13, 13, 11, 11, 7, 0], 217:[9, 9, 9, 9, 9, 6, 0], 218:[9, 9, 9, 9, 9, 6, 0], 219:[9, 9, 9, 9, 9, 6, 0], 220:[9, 0, 9, 9, 9, 6, 0], 221:[10, 10, 10, 4, 4, 4, 0], 222:[1, 7, 9, 7, 1, 1, 0], 223:[6, 9, 5, 9, 9, 5, 0], 224:[2, 4, 14, 9, 13, 10, 0], 225:[4, 2, 14, 9, 13, 10, 0], 226:[4, 10, 14, 9, 13, 10, 0], 227:[10, 5, 14, 9, 13, 10, 0], 228:[10, 0, 14, 9, 13, 10, 0], 229:[6, 6, 14, 9, 13, 10, 0], 230:[0, 0, 14, 13, 5, 14, 0], 231:[0, 0, 12, 2, 2, 12, 4], 232:[2, 4, 6, 13, 3, 6, 0], 233:[4, 2, 6, 13, 3, 6, 0], 234:[2, 5, 6, 13, 3, 6, 0], 235:[5, 0, 6, 13, 3, 6, 0], 236:[2, 4, 6, 4, 4, 14, 0], 237:[4, 2, 6, 4, 4, 14, 0], 238:[4, 10, 6, 4, 4, 14, 0], 239:[10, 0, 6, 4, 4, 14, 0], 240:[2, 12, 6, 9, 9, 6, 0], 241:[10, 5, 7, 9, 9, 9, 0], 242:[2, 4, 6, 9, 9, 6, 0], 243:[4, 2, 6, 9, 9, 6, 0], 244:[6, 0, 6, 9, 9, 6, 0], 245:[10, 5, 6, 9, 9, 6, 0], 246:[10, 0, 6, 9, 9, 6, 0], 247:[0, 6, 0, 15, 0, 6, 0], 248:[0, 0, 14, 13, 11, 7, 0], 249:[2, 4, 9, 9, 9, 14, 0], 250:[4, 2, 9, 9, 9, 14, 0], 251:[6, 0, 9, 9, 9, 14, 0], 252:[10, 0, 9, 9, 9, 14, 0], 253:[4, 2, 9, 9, 10, 4, 2], 254:[0, 1, 7, 9, 9, 7, 1], 255:[10, 0, 9, 9, 10, 4, 2] } },
+  "6x10": { w:6, h:10, adv:6, def:[0, 14, 17, 8, 4, 4, 0, 4, 0, 0], g:{ 32:[0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 33:[0, 4, 4, 4, 4, 4, 0, 4, 0, 0], 34:[0, 10, 10, 10, 0, 0, 0, 0, 0, 0], 35:[0, 10, 10, 31, 10, 31, 10, 10, 0, 0], 36:[0, 4, 14, 5, 14, 20, 14, 4, 0, 0], 37:[0, 18, 21, 10, 4, 10, 21, 9, 0, 0], 38:[0, 2, 5, 5, 2, 21, 9, 22, 0, 0], 39:[0, 4, 4, 4, 0, 0, 0, 0, 0, 0], 40:[0, 8, 4, 2, 2, 2, 4, 8, 0, 0], 41:[0, 2, 4, 8, 8, 8, 4, 2, 0, 0], 42:[0, 0, 17, 10, 31, 10, 17, 0, 0, 0], 43:[0, 0, 4, 4, 31, 4, 4, 0, 0, 0], 44:[0, 0, 0, 0, 0, 0, 12, 4, 2, 0], 45:[0, 0, 0, 0, 31, 0, 0, 0, 0, 0], 46:[0, 0, 0, 0, 0, 0, 4, 14, 4, 0], 47:[0, 16, 16, 8, 4, 2, 1, 1, 0, 0], 48:[0, 4, 10, 17, 17, 17, 10, 4, 0, 0], 49:[0, 4, 6, 5, 4, 4, 4, 31, 0, 0], 50:[0, 14, 17, 16, 12, 2, 1, 31, 0, 0], 51:[0, 31, 16, 8, 12, 16, 17, 14, 0, 0], 52:[0, 8, 12, 10, 9, 31, 8, 8, 0, 0], 53:[0, 31, 1, 13, 19, 16, 17, 14, 0, 0], 54:[0, 12, 2, 1, 13, 19, 17, 14, 0, 0], 55:[0, 31, 16, 8, 8, 4, 2, 2, 0, 0], 56:[0, 14, 17, 17, 14, 17, 17, 14, 0, 0], 57:[0, 14, 17, 25, 22, 16, 8, 6, 0, 0], 58:[0, 0, 4, 14, 4, 0, 4, 14, 4, 0], 59:[0, 0, 4, 14, 4, 0, 12, 4, 2, 0], 60:[0, 16, 8, 4, 2, 4, 8, 16, 0, 0], 61:[0, 0, 0, 31, 0, 31, 0, 0, 0, 0], 62:[0, 2, 4, 8, 16, 8, 4, 2, 0, 0], 63:[0, 14, 17, 8, 4, 4, 0, 4, 0, 0], 64:[0, 14, 17, 25, 21, 13, 1, 14, 0, 0], 65:[0, 4, 10, 17, 17, 31, 17, 17, 0, 0], 66:[0, 15, 18, 18, 14, 18, 18, 15, 0, 0], 67:[0, 14, 17, 1, 1, 1, 17, 14, 0, 0], 68:[0, 15, 18, 18, 18, 18, 18, 15, 0, 0], 69:[0, 31, 1, 1, 15, 1, 1, 31, 0, 0], 70:[0, 31, 1, 1, 15, 1, 1, 1, 0, 0], 71:[0, 14, 17, 1, 1, 25, 17, 14, 0, 0], 72:[0, 17, 17, 17, 31, 17, 17, 17, 0, 0], 73:[0, 14, 4, 4, 4, 4, 4, 14, 0, 0], 74:[0, 28, 8, 8, 8, 8, 9, 6, 0, 0], 75:[0, 17, 9, 5, 3, 5, 9, 17, 0, 0], 76:[0, 1, 1, 1, 1, 1, 1, 31, 0, 0], 77:[0, 17, 17, 27, 21, 17, 17, 17, 0, 0], 78:[0, 17, 17, 19, 21, 25, 17, 17, 0, 0], 79:[0, 14, 17, 17, 17, 17, 17, 14, 0, 0], 80:[0, 15, 17, 17, 15, 1, 1, 1, 0, 0], 81:[0, 14, 17, 17, 17, 17, 21, 14, 16, 0], 82:[0, 15, 17, 17, 15, 5, 9, 17, 0, 0], 83:[0, 14, 17, 1, 14, 16, 17, 14, 0, 0], 84:[0, 31, 4, 4, 4, 4, 4, 4, 0, 0], 85:[0, 17, 17, 17, 17, 17, 17, 14, 0, 0], 86:[0, 17, 17, 17, 10, 10, 10, 4, 0, 0], 87:[0, 17, 17, 17, 21, 21, 27, 17, 0, 0], 88:[0, 17, 17, 10, 4, 10, 17, 17, 0, 0], 89:[0, 17, 17, 10, 4, 4, 4, 4, 0, 0], 90:[0, 31, 16, 8, 4, 2, 1, 31, 0, 0], 91:[0, 14, 2, 2, 2, 2, 2, 14, 0, 0], 92:[0, 1, 1, 2, 4, 8, 16, 16, 0, 0], 93:[0, 14, 8, 8, 8, 8, 8, 14, 0, 0], 94:[0, 4, 10, 17, 0, 0, 0, 0, 0, 0], 95:[0, 0, 0, 0, 0, 0, 0, 0, 31, 0], 96:[4, 8, 0, 0, 0, 0, 0, 0, 0, 0], 97:[0, 0, 0, 14, 16, 30, 17, 30, 0, 0], 98:[0, 1, 1, 13, 19, 17, 19, 13, 0, 0], 99:[0, 0, 0, 14, 17, 1, 17, 14, 0, 0], 100:[0, 16, 16, 22, 25, 17, 25, 22, 0, 0], 101:[0, 0, 0, 14, 17, 31, 1, 14, 0, 0], 102:[0, 12, 18, 2, 15, 2, 2, 2, 0, 0], 103:[0, 0, 0, 30, 17, 17, 30, 16, 17, 14], 104:[0, 1, 1, 13, 19, 17, 17, 17, 0, 0], 105:[0, 4, 0, 6, 4, 4, 4, 14, 0, 0], 106:[0, 16, 0, 24, 16, 16, 16, 18, 18, 12], 107:[0, 1, 1, 17, 9, 7, 9, 17, 0, 0], 108:[0, 6, 4, 4, 4, 4, 4, 14, 0, 0], 109:[0, 0, 0, 11, 21, 21, 21, 17, 0, 0], 110:[0, 0, 0, 13, 19, 17, 17, 17, 0, 0], 111:[0, 0, 0, 14, 17, 17, 17, 14, 0, 0], 112:[0, 0, 0, 13, 19, 17, 19, 13, 1, 1], 113:[0, 0, 0, 22, 25, 17, 25, 22, 16, 16], 114:[0, 0, 0, 13, 19, 1, 1, 1, 0, 0], 115:[0, 0, 0, 14, 1, 14, 16, 15, 0, 0], 116:[0, 2, 2, 15, 2, 2, 18, 12, 0, 0], 117:[0, 0, 0, 17, 17, 17, 25, 22, 0, 0], 118:[0, 0, 0, 17, 17, 10, 10, 4, 0, 0], 119:[0, 0, 0, 17, 17, 21, 21, 10, 0, 0], 120:[0, 0, 0, 17, 10, 4, 10, 17, 0, 0], 121:[0, 0, 0, 17, 17, 25, 22, 16, 17, 14], 122:[0, 0, 0, 31, 8, 4, 2, 31, 0, 0], 123:[0, 24, 4, 8, 6, 8, 4, 24, 0, 0], 124:[0, 4, 4, 4, 4, 4, 4, 4, 0, 0], 125:[0, 6, 8, 4, 24, 4, 8, 6, 0, 0], 126:[0, 18, 21, 9, 0, 0, 0, 0, 0, 0], 160:[0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 161:[0, 4, 0, 4, 4, 4, 4, 4, 0, 0], 162:[0, 0, 4, 30, 5, 5, 5, 30, 4, 0], 163:[0, 12, 18, 2, 7, 2, 18, 13, 0, 0], 164:[0, 0, 0, 17, 14, 10, 14, 17, 0, 0], 165:[0, 17, 17, 10, 4, 31, 4, 4, 4, 0], 166:[0, 4, 4, 4, 0, 4, 4, 4, 0, 0], 167:[0, 14, 1, 7, 9, 18, 28, 16, 14, 0], 168:[10, 0, 0, 0, 0, 0, 0, 0, 0, 0], 169:[0, 14, 17, 21, 19, 21, 17, 14, 0, 0], 170:[0, 28, 18, 26, 20, 0, 30, 0, 0, 0], 171:[0, 0, 0, 36, 18, 9, 18, 36, 0, 0], 172:[0, 0, 0, 0, 30, 16, 0, 0, 0, 0], 173:[0, 0, 0, 0, 30, 0, 0, 0, 0, 0], 174:[0, 14, 17, 23, 19, 19, 17, 14, 0, 0], 175:[31, 0, 0, 0, 0, 0, 0, 0, 0, 0], 176:[0, 4, 10, 4, 0, 0, 0, 0, 0, 0], 177:[0, 0, 4, 4, 31, 4, 4, 31, 0, 0], 178:[12, 18, 8, 4, 30, 0, 0, 0, 0, 0], 179:[14, 16, 12, 16, 14, 0, 0, 0, 0, 0], 180:[8, 4, 0, 0, 0, 0, 0, 0, 0, 0], 181:[0, 0, 0, 17, 17, 17, 19, 13, 1, 0], 182:[0, 30, 23, 23, 22, 20, 20, 20, 0, 0], 183:[0, 0, 0, 0, 4, 0, 0, 0, 0, 0], 184:[0, 0, 0, 0, 0, 0, 0, 0, 8, 4], 185:[4, 6, 4, 4, 14, 0, 0, 0, 0, 0], 186:[0, 12, 18, 18, 12, 0, 30, 0, 0, 0], 187:[0, 0, 0, 9, 18, 36, 18, 9, 0, 0], 188:[2, 3, 2, 2, 39, 48, 40, 60, 32, 0], 189:[2, 3, 2, 2, 23, 40, 32, 16, 56, 0], 190:[3, 4, 2, 4, 19, 24, 20, 30, 16, 0], 191:[0, 4, 0, 4, 4, 2, 17, 14, 0, 0], 192:[2, 4, 14, 17, 17, 31, 17, 17, 0, 0], 193:[8, 4, 14, 17, 17, 31, 17, 17, 0, 0], 194:[4, 10, 14, 17, 17, 31, 17, 17, 0, 0], 195:[18, 13, 14, 17, 17, 31, 17, 17, 0, 0], 196:[10, 0, 14, 17, 17, 31, 17, 17, 0, 0], 197:[4, 10, 14, 17, 17, 31, 17, 17, 0, 0], 198:[0, 60, 10, 9, 57, 15, 9, 57, 0, 0], 199:[0, 14, 17, 1, 1, 1, 17, 14, 4, 2], 200:[2, 31, 1, 1, 15, 1, 1, 31, 0, 0], 201:[8, 31, 1, 1, 15, 1, 1, 31, 0, 0], 202:[4, 31, 1, 1, 15, 1, 1, 31, 0, 0], 203:[10, 31, 1, 1, 15, 1, 1, 31, 0, 0], 204:[2, 4, 14, 4, 4, 4, 4, 14, 0, 0], 205:[8, 4, 14, 4, 4, 4, 4, 14, 0, 0], 206:[4, 10, 14, 4, 4, 4, 4, 14, 0, 0], 207:[10, 0, 14, 4, 4, 4, 4, 14, 0, 0], 208:[0, 15, 18, 18, 23, 18, 18, 15, 0, 0], 209:[20, 10, 17, 19, 21, 25, 17, 17, 0, 0], 210:[2, 4, 14, 17, 17, 17, 17, 14, 0, 0], 211:[8, 4, 14, 17, 17, 17, 17, 14, 0, 0], 212:[4, 10, 14, 17, 17, 17, 17, 14, 0, 0], 213:[20, 10, 14, 17, 17, 17, 17, 14, 0, 0], 214:[10, 0, 14, 17, 17, 17, 17, 14, 0, 0], 215:[0, 0, 0, 17, 10, 4, 10, 17, 0, 0], 216:[0, 14, 25, 25, 21, 19, 19, 14, 0, 0], 217:[2, 4, 17, 17, 17, 17, 17, 14, 0, 0], 218:[8, 4, 17, 17, 17, 17, 17, 14, 0, 0], 219:[4, 10, 0, 17, 17, 17, 17, 14, 0, 0], 220:[10, 0, 17, 17, 17, 17, 17, 14, 0, 0], 221:[8, 4, 17, 17, 10, 4, 4, 4, 0, 0], 222:[0, 1, 15, 17, 15, 1, 1, 1, 0, 0], 223:[0, 14, 17, 9, 5, 9, 17, 13, 0, 0], 224:[2, 4, 0, 14, 16, 30, 17, 30, 0, 0], 225:[8, 4, 0, 14, 16, 30, 17, 30, 0, 0], 226:[4, 10, 0, 14, 16, 30, 17, 30, 0, 0], 227:[20, 10, 0, 14, 16, 30, 17, 30, 0, 0], 228:[0, 10, 0, 14, 16, 30, 17, 30, 0, 0], 229:[4, 10, 4, 14, 16, 30, 17, 30, 0, 0], 230:[0, 0, 0, 30, 40, 62, 9, 62, 0, 0], 231:[0, 0, 0, 14, 17, 1, 17, 14, 4, 2], 232:[2, 4, 0, 14, 17, 31, 1, 14, 0, 0], 233:[8, 4, 0, 14, 17, 31, 1, 14, 0, 0], 234:[4, 10, 0, 14, 17, 31, 1, 14, 0, 0], 235:[0, 10, 0, 14, 17, 31, 1, 14, 0, 0], 236:[2, 4, 0, 6, 4, 4, 4, 14, 0, 0], 237:[4, 2, 0, 6, 4, 4, 4, 14, 0, 0], 238:[4, 10, 0, 6, 4, 4, 4, 14, 0, 0], 239:[0, 10, 0, 6, 4, 4, 4, 14, 0, 0], 240:[0, 3, 12, 14, 17, 17, 17, 14, 0, 0], 241:[20, 10, 0, 13, 19, 17, 17, 17, 0, 0], 242:[2, 4, 0, 14, 17, 17, 17, 14, 0, 0], 243:[8, 4, 0, 14, 17, 17, 17, 14, 0, 0], 244:[4, 10, 0, 14, 17, 17, 17, 14, 0, 0], 245:[20, 10, 0, 14, 17, 17, 17, 14, 0, 0], 246:[0, 10, 0, 14, 17, 17, 17, 14, 0, 0], 247:[0, 0, 4, 0, 31, 0, 4, 0, 0, 0], 248:[0, 0, 0, 30, 25, 21, 19, 15, 0, 0], 249:[2, 4, 0, 17, 17, 17, 25, 22, 0, 0], 250:[8, 4, 0, 17, 17, 17, 25, 22, 0, 0], 251:[4, 10, 0, 17, 17, 17, 25, 22, 0, 0], 252:[0, 10, 0, 17, 17, 17, 25, 22, 0, 0], 253:[0, 8, 4, 17, 17, 25, 22, 16, 17, 14], 254:[0, 0, 1, 15, 17, 17, 17, 15, 1, 1], 255:[0, 10, 0, 17, 17, 25, 22, 16, 17, 14] } },
+};
+
+// ===================================================================================================
+// Zügli custom-layout render ENGINE (M4). A faithful JS port of the firmware renderer in
+// `firmware/src/display.rs` (draw_custom_layout / blit_scaled_text / place_text / element dispatch),
+// so the on-screen simulator matches the LED panel GLYPH-FOR-GLYPH (VERIFY.md fidelity bar).
+//
+// Depends on the global `FONTS` (auto-generated from embedded-graphics — the SAME rasteriser the
+// firmware draws through). Draws at FULL palette strength: the phone screen is not the brightness
+// surface, the panel is (VERIFY.md contract).
+//
+// PUBLIC INTERFACE (what the presentation layer consumes):
+//   PANEL_COLS, PANEL_ROWS = 64
+//   renderLayout(layout, ctx) -> { grid: Uint32Array(64*64), animating: bool }
+//     layout = { v, e:[ element… ] }           (the working/saved layout, schema §5.4)
+//     ctx = {
+//       deps:    [ { line:"14", destination:"Zürich, Triemli", minutes: 5|0|null }, … ] (soonest-first),
+//       station: "Zürich, Bahnhofstrasse",
+//       config:  { stripCity: bool, showLineBadges: bool },
+//       frame:   integer, +1 every 50 ms (drives marquee scroll),
+//       now:     Date (used for Clock/Date elements; local time),
+//     }
+//   grid cell = 0 (LED off) or 0xRRGGBB (lit, full strength). Later elements draw on top.
+// ===================================================================================================
+
+const PANEL_COLS = 64;
+const PANEL_ROWS = 64;
+
+// Palette — exact RGB from display.rs (full strength). Preset index c: 0=AMBER 1=ACCENT 2=DIM.
+const AMBER = 0xffa800;
+const ACCENT = 0xaa4a10;
+const DIM = 0x744a1e;
+const OFF = 0; // LED off (also badge digit cut-outs)
+
+// Marquee cadence — must match display.rs exactly.
+const MARQUEE_GAP = 14; // px between a scrolling text and its wrapped copy
+const HOLD_FRAMES = 100; // initial pause before scrolling (~5 s at 50 ms/frame)
+
+// Small icon bitmaps (row-major, 1 = lit), identical to display.rs.
+const TRAIN_GLYPH = [
+  [0, 0, 1, 1, 1, 1, 1, 0, 0],
+  [0, 1, 1, 1, 1, 1, 1, 1, 0],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 0, 0, 0, 0, 0, 0, 0, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 0, 0, 0, 1, 0, 0, 0, 1],
+  [1, 0, 0, 0, 1, 0, 0, 0, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [0, 1, 1, 0, 0, 0, 1, 1, 0],
+];
+const Z_GLYPH = [[1, 1, 1], [0, 0, 1], [0, 1, 0], [1, 0, 0], [1, 1, 1]];
+const ARROW_GLYPH = [
+  [0, 0, 0, 0, 1, 0, 0],
+  [0, 0, 0, 0, 0, 1, 0],
+  [1, 1, 1, 1, 1, 1, 1],
+  [0, 0, 0, 0, 0, 1, 0],
+  [0, 0, 0, 0, 1, 0, 0],
+];
+
+const clampInt = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v) | 0;
+const fontFor = (s) => (s === 1 ? FONTS["6x10"] : FONTS["5x7"]);
+
+// Resolve an element's colour: explicit 24-bit `col` overrides the preset index `c`.
+function elemColor(el) {
+  if (el.col !== undefined && el.col !== null) return (el.col & 0xffffff) >>> 0;
+  switch (el.c | 0) {
+    case 1: return ACCENT;
+    case 2: return DIM;
+    default: return AMBER;
+  }
+}
+
+// Set one pixel, clipped to the panel. Later writes win (draw order), matching the firmware.
+function pset(grid, x, y, rgb) {
+  x |= 0; y |= 0;
+  if (x >= 0 && x < PANEL_COLS && y >= 0 && y < PANEL_ROWS) grid[y * PANEL_COLS + x] = rgb >>> 0;
+}
+
+function fillRect(grid, x, y, w, h, rgb) {
+  for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) pset(grid, x + xx, y + yy, rgb);
+}
+
+// Draw `text` at baseline-top (x0,y) in `font`, upscaled by integer k (each source pixel → k×k
+// block), clipped to the horizontal band [clipX0, clipX1). Advance per char = font.adv * k. Port of
+// display.rs `blit_scaled_text` (glyphs rasterised once into FONTS, then pixel-doubled here).
+function blitScaledText(grid, text, x0, y, font, k, rgb, clipX0, clipX1) {
+  const cw = font.adv, ch = font.h;
+  let x = x0;
+  for (const chr of text) {
+    const cp = chr.codePointAt(0);
+    if (x + cw * k > clipX0 && x < clipX1) {
+      const glyph = font.g[cp] || font.def;
+      for (let gy = 0; gy < ch; gy++) {
+        const row = glyph[gy];
+        for (let gx = 0; gx < cw; gx++) {
+          if ((row >> gx) & 1) {
+            for (let sy = 0; sy < k; sy++) {
+              for (let sx = 0; sx < k; sx++) {
+                const px = x + gx * k + sx;
+                if (px >= clipX0 && px < clipX1) pset(grid, px, y + gy * k + sy, rgb);
+              }
+            }
+          }
+        }
+      }
+    }
+    x += cw * k;
+  }
+}
+
+// Count Unicode code points (matches Rust `str::chars().count()` used for text width).
+const cpLen = (s) => [...s].length;
+
+// Draw a text-bearing element honouring its font s, scale k, alignment a and box width w. Fit →
+// flush aligned; overflow (+ allowMarquee) → marquee clipped to [x, x+w). Port of `place_text`.
+function placeText(grid, text, el, allowMarquee, frame) {
+  const font = fontFor(el.s | 0);
+  const cw = font.adv;
+  const k = clampInt(el.k === undefined ? 1 : el.k, 1, 3);
+  const x = el.x | 0, y = el.y | 0;
+  const rgb = elemColor(el);
+  const textW = cpLen(text) * cw * k;
+  const w = el.w | 0;
+  const avail = w > 0 ? w : textW;
+  const fits = textW <= avail;
+  if (fits || !allowMarquee) {
+    let off = 0;
+    if (fits) {
+      if ((el.a | 0) === 1) off = (avail - textW) >> 1;
+      else if ((el.a | 0) === 2) off = avail - textW;
+    }
+    const c0 = w > 0 ? x : -Infinity;
+    const c1 = w > 0 ? x + avail : Infinity;
+    blitScaledText(grid, text, x + off, y, font, k, rgb, c0, c1);
+    return false;
+  }
+  const period = textW + MARQUEE_GAP;
+  const phase = frame % (HOLD_FRAMES + period);
+  const offset = Math.max(0, phase - HOLD_FRAMES); // 1 px/frame after the initial hold
+  blitScaledText(grid, text, x - offset, y, font, k, rgb, x, x + avail);
+  blitScaledText(grid, text, x - offset + period, y, font, k, rgb, x, x + avail);
+  return true;
+}
+
+// Small bitmap glyph, each lit cell → k×k block.
+function blitBitmap(grid, glyph, x, y, k, rgb) {
+  for (let gy = 0; gy < glyph.length; gy++) {
+    const row = glyph[gy];
+    for (let gx = 0; gx < row.length; gx++) {
+      if (row[gx] === 1) {
+        for (let sy = 0; sy < k; sy++) for (let sx = 0; sx < k; sx++) pset(grid, x + gx * k + sx, y + gy * k + sy, rgb);
+      }
+    }
+  }
+}
+
+// A filled line badge with the label cut out (unlit digits), like the built-in board. Fixed size
+// (FONT_6X10, 11 px tall) — k is ignored, matching draw_badge. Returns x just past the badge.
+function drawBadge(grid, line, x, y, fillRgb) {
+  const w = cpLen(line) * 6 + 5;
+  fillRect(grid, x, y, w, 11, fillRgb);
+  blitScaledText(grid, line, x + 3, y + 1, FONTS["6x10"], 1, OFF, -Infinity, Infinity);
+  return x + w;
+}
+
+// Apply the "hide city names" config: drop a leading "City, " prefix. Mirrors display.rs `city`.
+function city(name, config) {
+  if (config && config.stripCity) {
+    const i = name.indexOf(", ");
+    if (i >= 0 && i + 2 < name.length) return name.slice(i + 2);
+  }
+  return name;
+}
+
+// Minutes text: null → "--", 0 → "now" (only via fallback; 0 is drawn as the tram pictogram), N → "N'".
+function fmtMinutes(m) {
+  if (m === null || m === undefined) return "--";
+  if (m === 0) return "now";
+  return m + "'";
+}
+
+// Live Departure field (t=1): look up slot `di` (soonest-first); missing slot draws nothing.
+function drawDepField(grid, el, ctx) {
+  const dep = ctx.deps[clampInt(el.di | 0, 0, 2)];
+  if (!dep) return false;
+  const rgb = elemColor(el);
+  const fk = el.fk | 0;
+  if (fk === 0) {
+    if (ctx.config && ctx.config.showLineBadges) {
+      drawBadge(grid, String(dep.line), el.x | 0, el.y | 0, rgb);
+      return false;
+    }
+    return placeText(grid, String(dep.line), el, true, ctx.frame);
+  }
+  if (fk === 1) return placeText(grid, city(String(dep.destination), ctx.config), el, true, ctx.frame);
+  // fk === 2: time
+  if (dep.minutes === 0) {
+    blitBitmap(grid, TRAIN_GLYPH, el.x | 0, el.y | 0, clampInt(el.k === undefined ? 1 : el.k, 1, 3), rgb);
+    return false;
+  }
+  return placeText(grid, fmtMinutes(dep.minutes), el, true, ctx.frame);
+}
+
+const pad2 = (n) => String(n).padStart(2, "0");
+
+function drawClock(grid, el, ctx) {
+  const d = ctx.now || new Date();
+  const s = (el.f | 0) === 1 ? `${d.getHours()}:${pad2(d.getMinutes())}` : `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return placeText(grid, s, el, false, 0);
+}
+
+function drawDate(grid, el, ctx) {
+  const d = ctx.now || new Date();
+  const s = (el.f | 0) === 1
+    ? `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`
+    : `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.`;
+  return placeText(grid, s, el, false, 0);
+}
+
+function drawDivider(grid, el) {
+  const len = (el.w | 0) > 0 ? (el.w | 0) : PANEL_COLS - (el.x | 0);
+  const th = clampInt(el.th === undefined ? 1 : el.th, 1, 2);
+  fillRect(grid, el.x | 0, el.y | 0, len, th, elemColor(el));
+}
+
+function drawIcon(grid, el) {
+  const k = clampInt(el.k === undefined ? 1 : el.k, 1, 3);
+  const rgb = elemColor(el), x = el.x | 0, y = el.y | 0;
+  switch (el.g | 0) {
+    case 1: blitBitmap(grid, Z_GLYPH, x, y, k, rgb); break;
+    case 2: blitBitmap(grid, ARROW_GLYPH, x, y, k, rgb); break;
+    default: blitBitmap(grid, TRAIN_GLYPH, x, y, k, rgb); break;
+  }
+}
+
+// Render a whole custom layout to a fresh 64×64 grid. Returns { grid, animating }.
+function renderLayout(layout, ctx) {
+  const grid = new Uint32Array(PANEL_COLS * PANEL_ROWS);
+  let animating = false;
+  const els = (layout && layout.e) || [];
+  for (const el of els) {
+    switch (el.t | 0) {
+      case 0: animating = placeText(grid, el.v || "", el, true, ctx.frame) || animating; break;
+      case 1: animating = drawDepField(grid, el, ctx) || animating; break;
+      case 2: animating = placeText(grid, city(ctx.station || "", ctx.config), el, true, ctx.frame) || animating; break;
+      case 3: animating = drawClock(grid, el, ctx) || animating; break;
+      case 4: animating = drawDate(grid, el, ctx) || animating; break;
+      case 5: drawDivider(grid, el); break;
+      case 6: drawIcon(grid, el); break;
+      default: break;
+    }
+  }
+  return { grid, animating };
+}
+
+// Export for the jsc test harness (ignored in the browser).
+if (typeof globalThis !== "undefined") {
+  globalThis.ZugliPanel = { PANEL_COLS, PANEL_ROWS, renderLayout, AMBER, ACCENT, DIM };
+}
+</script>
 
 <script>
 "use strict";
@@ -501,13 +1107,13 @@ $("save").addEventListener("click", async () => {
 
 // ---------- settings sheet (board config: GET/POST /config) ----------
 const sheet = $("settings"), setStatus = $("settings-status");
-const stripToggle = $("opt-stripcity"), badgesToggle = $("opt-badges"), focusToggle = $("opt-focus"),
+const stripToggle = $("opt-stripcity"), badgesToggle = $("opt-badges"),
       brightRange = $("opt-brightness"), brightVal = $("bright-val"),
       autoToggle = $("opt-auto"), startTime = $("opt-start"), endTime = $("opt-end"),
       dimSub = $("dim-sub"), offToggle = $("opt-offdim");
 let configLoaded = false;
 // The board's current settings; controls mirror this and every change posts the whole object.
-let cfg = { stripCity:false, showLineBadges:true, focusView:false, brightness:6, autoBrightness:true, offWhenDimmed:false, reducedStart:1200, reducedEnd:480 };
+let cfg = { stripCity:false, showLineBadges:true, uiMode:0, brightness:6, autoBrightness:true, offWhenDimmed:false, reducedStart:1200, reducedEnd:480 };
 
 const toMin = (hhmm) => { const [h,m] = hhmm.split(":").map(Number); return h*60 + m; };
 const toHHMM = (min) => `${String(Math.floor(min/60)).padStart(2,"0")}:${String(min%60).padStart(2,"0")}`;
@@ -515,7 +1121,14 @@ const toHHMM = (min) => `${String(Math.floor(min/60)).padStart(2,"0")}:${String(
 function renderConfig(){
   stripToggle.checked = !!cfg.stripCity;
   badgesToggle.checked = !!cfg.showLineBadges;
-  focusToggle.checked = !!cfg.focusView;
+  // M5: reflect the board's view mode in the main-page selector (Default / Focus / Custom).
+  for (let i = 0; i < 3; i++){
+    const seg = $("ui-mode-" + i);
+    seg.classList.toggle("active", (cfg.uiMode | 0) === i);
+    seg.setAttribute("aria-selected", String((cfg.uiMode | 0) === i));
+  }
+  // Let the UI-builder script refresh anything of its own that mirrors cfg (thumbnail, editor sim).
+  if (window.zugliConfigChanged) window.zugliConfigChanged();
   brightRange.value = cfg.brightness;
   brightVal.textContent = (cfg.brightness * 10) + "%";
   autoToggle.checked = !!cfg.autoBrightness;
@@ -567,7 +1180,6 @@ async function applyChange(mutate){
 
 stripToggle.addEventListener("change", () => applyChange(() => { cfg.stripCity = stripToggle.checked; }));
 badgesToggle.addEventListener("change", () => applyChange(() => { cfg.showLineBadges = badgesToggle.checked; }));
-focusToggle.addEventListener("change", () => applyChange(() => { cfg.focusView = focusToggle.checked; }));
 autoToggle.addEventListener("change", () => applyChange(() => { cfg.autoBrightness = autoToggle.checked; }));
 offToggle.addEventListener("change", () => applyChange(() => { cfg.offWhenDimmed = offToggle.checked; }));
 // Live-update the % label while sliding; persist once the user lets go.
@@ -577,6 +1189,1032 @@ startTime.addEventListener("change", () => { if (startTime.value) applyChange(()
 endTime.addEventListener("change", () => { if (endTime.value) applyChange(() => { cfg.reducedEnd = toMin(endTime.value); }); });
 
 renderConfig(); // reflect defaults until the board's real config loads
+
+// M5: the main-page mode selector needs the board's real uiMode right away, so load /config
+// up front instead of waiting for the settings sheet to be opened for the first time.
+fetch("/config")
+  .then(r => r.json())
+  .then(c => { cfg = { ...cfg, ...c }; configLoaded = true; renderConfig(); })
+  .catch(() => {});
+</script>
+
+<!-- ================================================================================
+     Zügli panel SIMULATOR (M4) — presentation layer. Consumes window.ZugliPanel.renderLayout
+     (the parity-critical engine above) and draws its 64×64 grid as a dot-matrix of round
+     LEDs on a canvas: one grid cell = one LED, exact colour, no smoothing across cells.
+     Exposes: createPanelSim(canvas), renderPanelThumbnail(canvas, layout, ctx),
+     SAMPLE_PANEL_CTX. Plus the temporary #simdemo dev harness (markup above).
+     ================================================================================ -->
+<script id="panel-sim">
+"use strict";
+(() => {
+  const P = window.ZugliPanel;
+  if (!P) return;
+  const N = P.PANEL_COLS; // 64 (square panel; PANEL_ROWS === PANEL_COLS)
+
+  // Stand-in context for previews when there is no live data.
+  window.SAMPLE_PANEL_CTX = {
+    deps: [
+      { line: "14", destination: "Zürich, Triemli", minutes: 4 },
+      { line: "2", destination: "Zürich, Bahnhofplatz", minutes: 9 },
+      { line: "S6", destination: "Baden", minutes: 14 },
+    ],
+    station: "Zürich, Bahnhofstrasse",
+    config: { stripCity: false, showLineBadges: true },
+    now: new Date(),
+  };
+
+  // ---------- LED dot rendering ----------
+  // The canvas backing store is sized to the element's CSS box × devicePixelRatio, so one
+  // canvas px = one device px (no browser rescale, glyphs stay crisp). pitch = backing/64.
+  // Each LED is a round dot: lit = exact grid colour, a soft glow disc (radius < half the
+  // pitch, so neighbouring dots never merge) under a solid core; off = a very dim dot so
+  // the physical LED grid texture reads on the near-black substrate.
+  const SUBSTRATE = "#0a0a0a";
+  const OFF_DOT = "#1c1712";
+  const CORE_R = 0.35;  // dot radius, as a fraction of the LED pitch
+  const GLOW_R = 0.46;  // glow radius — kept under 0.5 so adjacent LEDs stay discrete
+  const TAU = Math.PI * 2;
+
+  function dot(g, cx, cy, r, style, alpha) {
+    g.globalAlpha = alpha;
+    g.fillStyle = style;
+    g.beginPath();
+    g.arc(cx, cy, r, 0, TAU);
+    g.fill();
+  }
+
+  // Per-canvas renderer: owns the backing-store size, a cached substrate (background + all
+  // 64×64 off dots, rebuilt only on resize) and draws lit LEDs over it each frame.
+  function createLedRenderer(canvas) {
+    const g = canvas.getContext("2d");
+    let pitch = 0;
+    let substrate = null;
+
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = canvas.clientWidth;
+      if (!cssW) return false; // hidden (e.g. overlay closed) — keep the current store
+      const w = Math.max(N, Math.round(cssW * dpr));
+      if (w === canvas.width && substrate) return false;
+      canvas.width = canvas.height = w;
+      pitch = w / N;
+      substrate = document.createElement("canvas");
+      substrate.width = substrate.height = w;
+      const s = substrate.getContext("2d");
+      s.fillStyle = SUBSTRATE;
+      s.fillRect(0, 0, w, w);
+      for (let y = 0; y < N; y++)
+        for (let x = 0; x < N; x++)
+          dot(s, (x + 0.5) * pitch, (y + 0.5) * pitch, pitch * CORE_R, OFF_DOT, 1);
+      g.imageSmoothingEnabled = false;
+      return true;
+    }
+
+    function draw(grid) {
+      resize(); // lazy: picks up first layout and dpr/viewport changes
+      if (!substrate) return;
+      g.globalAlpha = 1;
+      g.drawImage(substrate, 0, 0);
+      for (let i = 0; i < grid.length; i++) {
+        const c = grid[i];
+        if (!c) continue;
+        const col = `rgb(${(c >> 16) & 255},${(c >> 8) & 255},${c & 255})`;
+        const cx = ((i % N) + 0.5) * pitch;
+        const cy = (((i / N) | 0) + 0.5) * pitch;
+        dot(g, cx, cy, pitch * GLOW_R, col, 0.3);
+        dot(g, cx, cy, pitch * CORE_R, col, 1);
+      }
+      g.globalAlpha = 1;
+    }
+
+    return { resize, draw };
+  }
+
+  // ---------- reusable simulator controller ----------
+  // const sim = createPanelSim(canvasEl); sim.setLayout(l); sim.setContext(partial);
+  // sim.start(); sim.stop(). A rAF loop advances ctx.frame by 1 per whole 50 ms elapsed
+  // (the firmware's frame tick, which drives marquee scrolling) and redraws on change.
+  // prefers-reduced-motion: no auto-advance — one static frame, redrawn only on explicit
+  // setLayout/setContext.
+  function createPanelSim(canvas) {
+    const led = createLedRenderer(canvas);
+    const rm = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+    let layout = { v: 1, e: [] };
+    let ctx = { deps: [], station: "", config: { stripCity: false, showLineBadges: true }, frame: 0, now: null };
+    let liveClock = true; // until setContext supplies an explicit `now`
+    let wantRun = false;  // start() was called (survives a reduced-motion flip back)
+    let raf = 0, last = 0, acc = 0;
+
+    function render() {
+      const now = liveClock || !ctx.now ? new Date() : ctx.now;
+      led.draw(P.renderLayout(layout, { ...ctx, now }).grid);
+    }
+
+    function tick(t) {
+      if (last) {
+        acc += t - last;
+        const steps = Math.floor(acc / 50);
+        if (steps > 0) {
+          acc -= steps * 50;
+          ctx.frame += steps;
+          render();
+        }
+      } else {
+        render();
+      }
+      last = t;
+      raf = requestAnimationFrame(tick);
+    }
+
+    function loop(on) {
+      if (on && !raf) { last = 0; acc = 0; raf = requestAnimationFrame(tick); }
+      if (!on && raf) { cancelAnimationFrame(raf); raf = 0; }
+    }
+
+    if (rm && rm.addEventListener) {
+      rm.addEventListener("change", () => { loop(wantRun && !rm.matches); render(); });
+    }
+    window.addEventListener("resize", () => { if (led.resize()) render(); });
+
+    return {
+      setLayout(l) { layout = l || { v: 1, e: [] }; render(); },
+      setContext(partial) {
+        if (partial) {
+          if ("now" in partial) liveClock = false;
+          const config = partial.config ? { ...ctx.config, ...partial.config } : ctx.config;
+          ctx = { ...ctx, ...partial, config };
+        }
+        render();
+      },
+      start() { wantRun = true; render(); loop(!(rm && rm.matches)); },
+      stop() { wantRun = false; loop(false); },
+    };
+  }
+
+  // One static frame (frame 0) at whatever size the canvas has — for main-page thumbnails.
+  function renderPanelThumbnail(canvas, layout, ctx) {
+    const led = createLedRenderer(canvas);
+    const full = {
+      deps: [], station: "", config: { stripCity: false, showLineBadges: true }, now: new Date(),
+      ...(ctx || {}),
+      frame: 0,
+    };
+    led.draw(P.renderLayout(layout || { v: 1, e: [] }, full).grid);
+  }
+
+  window.createPanelSim = createPanelSim;
+  window.renderPanelThumbnail = renderPanelThumbnail;
+
+  // ---------- #simdemo dev harness (temporary, superseded by a later milestone) ----------
+  // The M2 test layout, verbatim from FEATURE_UI_BUILDER M2. The di:2 departure field with
+  // only partial slot data rendering nothing is expected behaviour, not a bug.
+  const SIMDEMO_LAYOUT = {"v":1,"e":[
+    {"t":0,"x":1,"y":0,"v":"S1"},
+    {"t":0,"x":15,"y":0,"k":3,"col":5296264,"v":"3"},
+    {"t":0,"x":30,"y":0,"s":1,"k":2,"c":1,"v":"M2"},
+    {"t":5,"x":0,"y":22,"th":2,"c":1},
+    {"t":1,"x":1,"y":26,"s":1,"di":0,"fk":0},
+    {"t":1,"x":16,"y":29,"w":30,"di":0,"fk":1},
+    {"t":1,"x":50,"y":29,"c":1,"di":0,"fk":2},
+    {"t":1,"x":50,"y":38,"c":1,"di":1,"fk":2},
+    {"t":1,"x":50,"y":47,"c":2,"di":2,"fk":2},
+    {"t":3,"x":1,"y":38,"s":1,"f":1},
+    {"t":2,"x":1,"y":49,"w":42,"c":1},
+    {"t":4,"x":1,"y":58,"c":2},
+    {"t":6,"x":48,"y":49,"g":0},
+    {"t":6,"x":46,"y":58,"g":1,"c":1},
+    {"t":6,"x":54,"y":58,"g":2,"c":2}
+  ]};
+
+  const demo = document.getElementById("simdemo");
+  let demoSim = null;
+
+  function syncSimDemo() {
+    const open = location.hash === "#simdemo";
+    demo.classList.toggle("hidden", !open);
+    if (open) {
+      if (!demoSim) {
+        demoSim = createPanelSim(document.getElementById("simdemo-canvas"));
+        demoSim.setLayout(SIMDEMO_LAYOUT);
+        // Pass the sample ctx minus `now`, so the Clock/Date elements tick with real time.
+        const { now, ...live } = window.SAMPLE_PANEL_CTX;
+        demoSim.setContext(live);
+      }
+      demoSim.start();
+    } else if (demoSim) {
+      demoSim.stop();
+    }
+  }
+
+  function closeSimDemo() {
+    // replaceState instead of `location.hash = ""` so no stray "#" is left in the URL.
+    history.replaceState(null, "", location.pathname + location.search);
+    syncSimDemo();
+  }
+
+  window.addEventListener("hashchange", syncSimDemo);
+  document.getElementById("simdemo-close").addEventListener("click", closeSimDemo);
+  demo.addEventListener("click", (e) => { if (e.target === demo) closeSimDemo(); });
+  syncSimDemo();
+})();
+</script>
+
+<!-- ================================================================================
+     M5 UI BUILDER — main-page board-view selector + entry card + the full-screen
+     layout editor. Presentation/editor logic only: consumes the engine & simulator
+     strictly through window.ZugliPanel / createPanelSim / renderPanelThumbnail /
+     SAMPLE_PANEL_CTX, and talks to the device via GET/POST /layout, POST /preview,
+     POST /preview/end and POST /config (the latter through applyChange).
+     ================================================================================ -->
+<script id="ui-builder">
+"use strict";
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const P = window.ZugliPanel;
+
+  // ---------- budget/parity-critical helpers (FEATURE_UI_BUILDER §8, verbatim) ----------
+  // Serialize omitting schema-default fields, exactly like the firmware — keeps POST bodies ~1 KB
+  // (the device HTTP buffer is 2 KB), and matches the byte budget the firmware enforces.
+  function serializeLayout(layout){
+    const DEF = {x:0,y:0,w:0,s:0,k:1,c:0,a:0,v:"",di:0,fk:0,sp:false,th:1,f:0,g:0};
+    const KEYS = ["x","y","w","s","k","c","a","v","di","fk","sp","th","f","g"];
+    const e = layout.e.map(el => {
+      const o = { t: el.t|0 };
+      for (const key of KEYS) if (el[key] !== undefined && el[key] !== DEF[key]) o[key] = el[key];
+      if (el.col !== undefined && el.col !== null) o.col = el.col & 0xFFFFFF;
+      return o;
+    });
+    return JSON.stringify({ v:1, e });
+  }
+
+  const clampI = (v,lo,hi) => { v = v|0; return v<lo?lo:v>hi?hi:v; };
+  function clampElement(el){
+    el.x = clampI(el.x||0,0,63); el.y = clampI(el.y||0,0,63); el.w = clampI(el.w||0,0,64);
+    el.s = clampI(el.s||0,0,1); el.k = clampI(el.k==null?1:el.k,1,3);
+    el.c = clampI(el.c||0,0,2); el.a = clampI(el.a||0,0,2);
+    el.di = clampI(el.di||0,0,2); el.fk = clampI(el.fk||0,0,2);
+    el.th = clampI(el.th==null?1:el.th,1,2); el.f = clampI(el.f||0,0,1); el.g = clampI(el.g||0,0,2);
+    if (typeof el.v === "string" && el.v.length > 24) el.v = el.v.slice(0,24);
+    return el;
+  }
+
+  // Default element templates. Each newly-added element is auto-selected (open its props).
+  function makeElement(type){
+    switch(type){
+      case "text":    return {t:0, x:2, y:2,  s:0, k:1, c:0, a:0, v:"Text"};
+      case "station": return {t:2, x:1, y:0,  w:62, s:1, k:1, c:0, a:0};
+      case "clock":   return {t:3, x:2, y:2,  s:1, k:1, c:0, a:0, f:0};
+      case "date":    return {t:4, x:2, y:2,  s:0, k:1, c:0, a:0, f:0};
+      case "divider": return {t:5, x:0, y:32, w:0, th:1, c:1};
+      case "icon":    return {t:6, x:26,y:26, k:2, c:0, g:0};
+    }
+  }
+  // A Departure adds THREE t=1 fields for the next free slot, laid out like the built-in board row.
+  function makeDeparture(di){
+    const ry = 12 + di*17;
+    return [
+      {t:1, di, fk:0, x:1,  y:ry+3, s:1, k:1, c:0},        // badge
+      {t:1, di, fk:1, x:20, y:ry+6, w:26, s:0, k:1, c:0},  // direction (marquee width)
+      {t:1, di, fk:2, x:50, y:ry+6, s:0, k:1, c:1, a:2},   // time
+    ];
+  }
+
+  // Live-preview driver: immediate on open, debounced ~200 ms on edits, 5 s keepalive, coalesced so
+  // only the latest working copy is ever in flight. getLayout() returns the current working layout.
+  function createPreviewDriver(getLayout){
+    let inFlight=false, queued=false, debounce=0, keep=0;
+    async function flush(){
+      if (inFlight){ queued=true; return; }
+      inFlight=true; queued=false;
+      try { await fetch("/preview",{method:"POST",headers:{"Content-Type":"application/json"},body:serializeLayout(getLayout())}); } catch(_){}
+      inFlight=false; if (queued) flush();
+    }
+    return {
+      open(){ flush(); keep=setInterval(flush,5000); },
+      edit(){ clearTimeout(debounce); debounce=setTimeout(flush,200); },
+      close(){ clearInterval(keep); clearTimeout(debounce); keep=0; debounce=0; try{ fetch("/preview/end",{method:"POST"}); }catch(_){} },
+    };
+  }
+
+  // ---------- constants + state ----------
+  const MAX_ELEMENTS = 16;
+  const BYTES_SOFT = 1450;  // the palette stops adding above this (headroom under the hard cap)
+  const BYTES_MAX = 1536;   // firmware LAYOUT_MAX_BYTES — never POST a bigger body
+
+  let savedLayout = { v: 1, e: [] }; // last persisted layout (seeds the thumbnail + editor)
+  let working = { v: 1, e: [] };     // the editor's working copy
+  let dirty = false;
+  let sel = -1;                      // index into working.e, -1 = nothing selected
+  let editorOpen = false;
+  let sim = null;                    // createPanelSim instance, mounted on first open
+  const driver = createPreviewDriver(() => working);
+
+  const editorEl = $("editor"), stage = $("ed-stage"), ovCanvas = $("ed-overlay");
+
+  const cur = () => (sel >= 0 ? working.e[sel] : null);
+
+  function normalizeLayout(l){
+    const e = (l && Array.isArray(l.e)) ? l.e.slice(0, MAX_ELEMENTS).map(o => clampElement({ ...o })) : [];
+    return { v: 1, e };
+  }
+
+  // ---------- sample-context plumbing (sim, thumbnail and measurement all agree) ----------
+  const cpLen = (s) => [...s].length;
+  const pad2 = (n) => String(n).padStart(2, "0");
+  function stripCityName(name){
+    if (cfg.stripCity){
+      const i = name.indexOf(", ");
+      if (i >= 0 && i + 2 < name.length) return name.slice(i + 2);
+    }
+    return name;
+  }
+  const edStation = () => (selectedStop && selectedStop.name) ? selectedStop.name : window.SAMPLE_PANEL_CTX.station;
+  const edDeps = () => window.SAMPLE_PANEL_CTX.deps;
+  const edConfig = () => ({ stripCity: !!cfg.stripCity, showLineBadges: !!cfg.showLineBadges });
+
+  // ---------- element metrics (mirror of the engine's text/badge/glyph sizing) ----------
+  const GLYPH_DIM = [[9, 10], [3, 5], [7, 5]]; // tram, Z, arrow — w×h at k=1
+  function elementText(el){
+    const t = el.t | 0, d = new Date();
+    if (t === 0) return el.v || "";
+    if (t === 2) return stripCityName(edStation());
+    if (t === 3) return ((el.f | 0) === 1 ? String(d.getHours()) : pad2(d.getHours())) + ":" + pad2(d.getMinutes());
+    if (t === 4) return (el.f | 0) === 1
+      ? `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`
+      : `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.`;
+    if (t === 1){
+      const dep = edDeps()[clampI(el.di || 0, 0, 2)];
+      if (!dep) return "";
+      const fk = el.fk | 0;
+      if (fk === 0) return String(dep.line);
+      if (fk === 1) return stripCityName(String(dep.destination));
+      return dep.minutes == null ? "--" : dep.minutes === 0 ? "now" : dep.minutes + "'";
+    }
+    return "";
+  }
+  // Bounding box in LED units, anchored at (el.x, el.y) like the firmware draws.
+  function measureEl(el){
+    const t = el.t | 0, x = el.x | 0, y = el.y | 0, k = clampI(el.k == null ? 1 : el.k, 1, 3);
+    if (t === 5){
+      const w = (el.w | 0) > 0 ? (el.w | 0) : 64 - x;
+      return { x, y, w, h: clampI(el.th == null ? 1 : el.th, 1, 2) };
+    }
+    if (t === 6){
+      const d = GLYPH_DIM[clampI(el.g || 0, 0, 2)];
+      return { x, y, w: d[0] * k, h: d[1] * k };
+    }
+    if (t === 1 && (el.fk | 0) === 0 && edConfig().showLineBadges){
+      const dep = edDeps()[clampI(el.di || 0, 0, 2)];
+      return { x, y, w: (dep ? cpLen(String(dep.line)) : 1) * 6 + 5, h: 11 };
+    }
+    if (t === 1 && (el.fk | 0) === 2){
+      const dep = edDeps()[clampI(el.di || 0, 0, 2)];
+      if (dep && dep.minutes === 0) return { x, y, w: 9 * k, h: 10 * k }; // tram pictogram
+    }
+    const adv = (el.s | 0) === 1 ? 6 : 5, fh = (el.s | 0) === 1 ? 10 : 7;
+    const natural = Math.max(1, cpLen(elementText(el))) * adv * k;
+    const w = (el.w | 0) > 0 ? (el.w | 0) : natural;
+    return { x, y, w: Math.max(1, w), h: fh * k };
+  }
+
+  // ---------- departure grouping ----------
+  const isConnectedDep = (el) => el && (el.t | 0) === 1 && !el.sp;
+  function groupIdx(i){
+    const el = working.e[i];
+    if (!isConnectedDep(el)) return [i];
+    const out = [];
+    working.e.forEach((e2, j) => { if (isConnectedDep(e2) && (e2.di | 0) === (el.di | 0)) out.push(j); });
+    return out;
+  }
+  function freeDepSlot(){
+    const used = new Set(working.e.filter(e2 => (e2.t | 0) === 1).map(e2 => e2.di | 0));
+    for (let di = 0; di < 3; di++) if (!used.has(di)) return di;
+    return -1;
+  }
+  const TYPE_NAMES = ["Text", "Departure", "Station", "Clock", "Date", "Divider", "Icon"];
+  const FK_NAMES = ["Badge", "Direction", "Time"];
+  const elName = (el) => (el.t | 0) === 1
+    ? `Departure ${(el.di | 0) + 1} · ${FK_NAMES[el.fk | 0]}`
+    : (TYPE_NAMES[el.t | 0] || "Element");
+
+  // ---------- main page: thumbnail + entry card + mode selector ----------
+  function updateThumb(){
+    renderPanelThumbnail($("entry-thumb"), savedLayout,
+      { ...window.SAMPLE_PANEL_CTX, station: edStation(), config: edConfig(), now: new Date() });
+    $("entry-sub").textContent = savedLayout.e.length ? "Custom layout" : "No custom layout yet";
+  }
+
+  for (let i = 0; i < 3; i++){
+    $("ui-mode-" + i).addEventListener("click", () => {
+      // Custom with nothing saved yet: go design one instead of switching to an empty board.
+      if (i === 2 && !savedLayout.e.length){ openEditor(); return; }
+      if ((cfg.uiMode | 0) === i) return;
+      applyChange(() => { cfg.uiMode = i; });
+    });
+  }
+  $("open-editor").addEventListener("click", openEditor);
+
+  // renderConfig() calls this whenever cfg changes (badges/city toggles alter how elements
+  // measure and render, and the selector active-segment is handled inside renderConfig itself).
+  window.zugliConfigChanged = () => {
+    updateThumb();
+    if (editorOpen && sim){
+      sim.setContext({ config: edConfig() });
+      drawOverlay();
+    }
+  };
+
+  // ---------- editor open/close ----------
+  function openEditor(){
+    editorOpen = true;
+    editorEl.classList.remove("hidden");
+    document.body.classList.add("ed-lock");
+    working = JSON.parse(JSON.stringify(savedLayout));
+    dirty = false; sel = -1;
+    $("ed-save").disabled = true;
+    $("ed-save").textContent = "Save";
+    $("ui-status").classList.add("hidden");
+    hideEdStatus();
+    if (!sim) sim = createPanelSim($("ed-canvas"));
+    sim.setContext({ deps: edDeps(), station: edStation(), config: edConfig() });
+    sim.start();
+    driver.open();
+    refreshAll();
+    // The persisted layout may have changed under us (another phone) — refresh in the
+    // background and only swap the working copy in while it is still untouched.
+    fetch("/layout").then(r => r.json()).then(l => {
+      if (!editorOpen || dirty) return;
+      savedLayout = normalizeLayout(l);
+      working = JSON.parse(JSON.stringify(savedLayout));
+      sel = -1;
+      refreshAll();
+      updateThumb();
+    }).catch(() => {});
+  }
+  function closeEditor(){
+    editorOpen = false;
+    if (sim) sim.stop();
+    editorEl.classList.add("hidden");
+    document.body.classList.remove("ed-lock");
+  }
+  function cancelEditor(){
+    if (dirty){
+      showConfirm("Discard changes?", "Discard", () => { driver.close(); closeEditor(); });
+      return;
+    }
+    driver.close(); closeEditor();
+  }
+  $("ed-cancel").addEventListener("click", cancelEditor);
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !editorOpen) return;
+    if (!$("ed-confirm").classList.contains("hidden")){ hideConfirm(); return; }
+    cancelEditor();
+  });
+
+  // ---------- shared refresh paths ----------
+  function refreshAll(){
+    sim.setLayout(working);
+    $("ed-empty").classList.toggle("hidden", working.e.length > 0);
+    renderDock();
+    drawOverlay();
+  }
+  // Every mutation funnels through here: repaint, live-preview, mark dirty.
+  function mutated(){
+    dirty = true;
+    $("ed-save").disabled = false;
+    $("ed-empty").classList.toggle("hidden", working.e.length > 0);
+    sim.setLayout(working);
+    drawOverlay();
+    driver.edit();
+  }
+
+  function edStatus(msg, isErr){
+    const st = $("ed-status");
+    st.textContent = msg;
+    st.className = "note ed-note " + (isErr ? "err" : "ok");
+  }
+  function hideEdStatus(){ $("ed-status").className = "note ed-note hidden"; }
+
+  // ---------- dock: palette ----------
+  function addBytes(list){ return serializeLayout({ v: 1, e: working.e.concat(list) }).length; }
+  function updatePalette(){
+    const n = working.e.length;
+    const full = n >= MAX_ELEMENTS || addBytes([makeElement("text")]) > BYTES_SOFT;
+    document.querySelectorAll("#ed-chips .ed-chip").forEach(ch => {
+      let dis = full;
+      if (ch.dataset.add === "departure"){
+        const di = freeDepSlot();
+        dis = dis || di < 0 || n + 3 > MAX_ELEMENTS || addBytes(makeDeparture(Math.max(di, 0))) > BYTES_SOFT;
+      }
+      ch.disabled = dis;
+    });
+    $("ed-full").classList.toggle("hidden", !full);
+    $("ed-clear").disabled = !savedLayout.e.length;
+  }
+  function renderDock(){
+    if (sel < 0){
+      $("ed-props").classList.add("hidden");
+      $("ed-palette").classList.remove("hidden");
+      updatePalette();
+    } else {
+      renderProps();
+    }
+  }
+
+  $("ed-chips").addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".ed-chip");
+    if (!btn || btn.disabled) return;
+    if (btn.dataset.add === "departure"){
+      const di = freeDepSlot();
+      if (di < 0) return;
+      const trio = makeDeparture(di).map(clampElement);
+      if (working.e.length + 3 > MAX_ELEMENTS || addBytes(trio) > BYTES_SOFT) return;
+      working.e.push(...trio);
+      sel = working.e.length - 3; // the badge field
+    } else {
+      const el = clampElement(makeElement(btn.dataset.add));
+      if (working.e.length + 1 > MAX_ELEMENTS || addBytes([el]) > BYTES_SOFT) return;
+      working.e.push(el);
+      sel = working.e.length - 1;
+    }
+    mutated();
+    refreshAll(); // opens the new element's properties
+  });
+
+  // ---------- dock: properties sheet ----------
+  function show(id, on){ $(id).classList.toggle("hidden", !on); }
+  function segMark(rootId, val){
+    $(rootId).querySelectorAll("button").forEach(b => {
+      const on = +b.dataset.v === val;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", String(on));
+    });
+  }
+  const presetInt = (c) => (c === 1 ? P.ACCENT : c === 2 ? P.DIM : P.AMBER);
+  const hex6 = (n) => "#" + (n & 0xFFFFFF).toString(16).padStart(6, "0");
+
+  function renderSwatches(el){
+    const hasCol = el.col !== undefined && el.col !== null;
+    document.querySelectorAll(".sw[data-c]").forEach(b => {
+      b.classList.toggle("on", !hasCol && (el.c | 0) === +b.dataset.c);
+    });
+    const cust = document.querySelector(".sw-custom");
+    cust.classList.toggle("on", hasCol);
+    cust.style.background = hasCol ? hex6(el.col) : "";
+    $("ed-colinput").value = hex6(hasCol ? el.col : presetInt(el.c | 0));
+  }
+
+  function renderProps(){
+    const el = cur();
+    if (!el){ renderDock(); return; }
+    const t = el.t | 0;
+    const textLike = t === 0 || t === 1 || t === 2 || t === 3 || t === 4;
+    $("ed-props-title").textContent = elName(el);
+    show("pr-text", t === 0);
+    if (t === 0 && document.activeElement !== $("ed-text")) $("ed-text").value = el.v || "";
+    renderSwatches(el);
+    show("pr-align", textLike); if (textLike) segMark("seg-align", el.a | 0);
+    show("pr-font", textLike); if (textLike) segMark("seg-font", el.s | 0);
+    const scales = textLike || t === 6;
+    show("pr-scale", scales); if (scales) segMark("seg-scale", clampI(el.k == null ? 1 : el.k, 1, 3));
+    show("pr-format", t === 3 || t === 4);
+    if (t === 3){ $("ed-f0").textContent = "09:05"; $("ed-f1").textContent = "9:05"; segMark("seg-format", el.f | 0); }
+    if (t === 4){
+      const d = new Date(), short = `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.`;
+      $("ed-f0").textContent = short; $("ed-f1").textContent = short + d.getFullYear();
+      segMark("seg-format", el.f | 0);
+    }
+    show("pr-glyph", t === 6); if (t === 6) segMark("seg-glyph", el.g | 0);
+    show("pr-th", t === 5); if (t === 5) segMark("seg-th", clampI(el.th == null ? 1 : el.th, 1, 2));
+    $("ed-x").value = el.x | 0;
+    $("ed-y").value = el.y | 0;
+    const hasW = t === 0 || t === 2 || t === 3 || t === 4 || t === 5 || (t === 1 && (el.fk | 0) === 1);
+    show("pr-w", hasW);
+    if (hasW){
+      $("ed-w").value = el.w | 0;
+      $("pl-w").textContent = t === 5 ? "Length" : "Width";
+      $("ps-w").textContent = t === 5 ? "0 = to the right edge" : "0 = fit the text";
+    }
+    show("pr-split", t === 1 && !el.sp);
+    $("ed-palette").classList.add("hidden");
+    $("ed-props").classList.remove("hidden");
+  }
+
+  $("ed-back").addEventListener("click", () => { sel = -1; renderDock(); drawOverlay(); });
+
+  $("ed-text").addEventListener("input", () => {
+    const el = cur();
+    if (!el || (el.t | 0) !== 0) return;
+    el.v = String($("ed-text").value).slice(0, 24);
+    mutated();
+  });
+
+  function bindSeg(id, apply){
+    $(id).addEventListener("click", (ev) => {
+      const b = ev.target.closest("button");
+      if (!b) return;
+      const el = cur();
+      if (!el) return;
+      apply(el, +b.dataset.v);
+      clampElement(el);
+      mutated();
+      renderProps();
+    });
+  }
+  bindSeg("seg-align", (el, v) => { el.a = v; });
+  bindSeg("seg-font", (el, v) => { el.s = v; });
+  bindSeg("seg-scale", (el, v) => { el.k = v; });
+  bindSeg("seg-format", (el, v) => { el.f = v; });
+  bindSeg("seg-glyph", (el, v) => { el.g = v; });
+  bindSeg("seg-th", (el, v) => { el.th = v; });
+
+  document.querySelectorAll(".sw[data-c]").forEach(b => {
+    b.style.background = hex6(presetInt(+b.dataset.c)); // real panel palette
+    b.addEventListener("click", () => {
+      const el = cur();
+      if (!el) return;
+      el.c = +b.dataset.c;
+      delete el.col; // presets clear the custom override
+      mutated();
+      renderSwatches(el);
+    });
+  });
+  $("ed-colinput").addEventListener("input", () => {
+    const el = cur();
+    if (!el) return;
+    el.col = parseInt($("ed-colinput").value.slice(1), 16) & 0xFFFFFF;
+    mutated();
+    renderSwatches(el);
+  });
+
+  // Nudges and numeric fields move/resize by exactly 1 LED — the pixel-perfect path.
+  const AXIS = { x: { min: 0, max: 63 }, y: { min: 0, max: 63 }, w: { min: 0, max: 64 } };
+  document.querySelectorAll(".nudge button").forEach(b => {
+    b.addEventListener("click", () => {
+      const el = cur();
+      if (!el) return;
+      const ax = b.dataset.nudge;
+      el[ax] = clampI((el[ax] | 0) + (+b.dataset.d), AXIS[ax].min, AXIS[ax].max);
+      $("ed-" + ax).value = el[ax];
+      mutated();
+    });
+  });
+  ["x", "y", "w"].forEach(ax => {
+    $("ed-" + ax).addEventListener("change", () => {
+      const el = cur();
+      if (!el) return;
+      el[ax] = clampI(+$("ed-" + ax).value || 0, AXIS[ax].min, AXIS[ax].max);
+      $("ed-" + ax).value = el[ax];
+      mutated();
+    });
+  });
+  function syncPosFields(){
+    const el = cur();
+    if (!el || $("ed-props").classList.contains("hidden")) return;
+    $("ed-x").value = el.x | 0;
+    $("ed-y").value = el.y | 0;
+    if (!$("pr-w").classList.contains("hidden")) $("ed-w").value = el.w | 0;
+  }
+
+  // Delete: a connected departure loses all three fields (confirmed); anything else goes directly.
+  $("ed-del").addEventListener("click", () => {
+    const el = cur();
+    if (!el) return;
+    if (isConnectedDep(el)){
+      showConfirm(`Delete departure ${(el.di | 0) + 1}? Its badge, direction and time all go.`, "Delete", () => {
+        const g = new Set(groupIdx(sel));
+        working.e = working.e.filter((_, j) => !g.has(j));
+        sel = -1;
+        mutated();
+        refreshAll();
+      });
+      return;
+    }
+    working.e.splice(sel, 1);
+    sel = -1;
+    mutated();
+    refreshAll();
+  });
+
+  // Split (one-way): via the properties button or a double-tap on the connected group.
+  function confirmSplit(el){
+    const di = el.di | 0;
+    showConfirm(`Split departure ${di + 1}? Its three fields then move separately — this can't be undone.`, "Split", () => {
+      const i = working.e.indexOf(el);
+      if (i < 0) return;
+      for (const j of groupIdx(i)) working.e[j].sp = true;
+      mutated();
+      if (sel >= 0) renderProps();
+    });
+  }
+  $("ed-split").addEventListener("click", () => {
+    const el = cur();
+    if (el && isConnectedDep(el)) confirmSplit(el);
+  });
+
+  // ---------- confirm dialog ----------
+  let confirmCb = null;
+  function showConfirm(msg, yesLabel, cb, noLabel){
+    $("ed-confirm-msg").textContent = msg;
+    $("ed-confirm-yes").textContent = yesLabel;
+    $("ed-confirm-no").textContent = noLabel || "Keep editing";
+    confirmCb = cb;
+    $("ed-confirm").classList.remove("hidden");
+  }
+  function hideConfirm(){ $("ed-confirm").classList.add("hidden"); confirmCb = null; }
+  $("ed-confirm-yes").addEventListener("click", () => { const cb = confirmCb; hideConfirm(); if (cb) cb(); });
+  $("ed-confirm-no").addEventListener("click", hideConfirm);
+  $("ed-confirm").addEventListener("click", (e) => { if (e.target === $("ed-confirm")) hideConfirm(); });
+
+  // ---------- overlay: 1-LED grid + selection chrome ----------
+  function sizeOverlay(){
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.round(ovCanvas.clientWidth * dpr);
+    if (w && ovCanvas.width !== w) ovCanvas.width = ovCanvas.height = w;
+  }
+  function drawOverlay(){
+    if (!editorOpen) return;
+    sizeOverlay();
+    const W = ovCanvas.width;
+    if (!W) return;
+    const g = ovCanvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const pitch = W / 64;
+    g.clearRect(0, 0, W, W);
+    // faint 1-LED placement grid
+    g.strokeStyle = "rgba(245,239,230,0.05)";
+    g.lineWidth = 1;
+    g.beginPath();
+    for (let i = 1; i < 64; i++){
+      const p = Math.round(i * pitch) + 0.5;
+      g.moveTo(p, 0); g.lineTo(p, W);
+      g.moveTo(0, p); g.lineTo(W, p);
+    }
+    g.stroke();
+    const el = cur();
+    if (!el) return;
+    // connected departure: dashed outline around the whole trio, selected field emphasised
+    if (isConnectedDep(el)){
+      const idxs = groupIdx(sel);
+      if (idxs.length > 1){
+        let x0 = 64, y0 = 64, x1 = 0, y1 = 0;
+        for (const j of idxs){
+          const b = measureEl(working.e[j]);
+          x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y);
+          x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h);
+        }
+        g.setLineDash([4 * dpr, 4 * dpr]);
+        g.strokeStyle = "rgba(184,118,72,0.6)";
+        g.lineWidth = 1.5 * dpr;
+        g.strokeRect(x0 * pitch - 4 * dpr, y0 * pitch - 4 * dpr, (x1 - x0) * pitch + 8 * dpr, (y1 - y0) * pitch + 8 * dpr);
+        g.setLineDash([]);
+      }
+    }
+    const b = measureEl(el);
+    const pad = 2 * dpr;
+    const rx = b.x * pitch - pad, ry = b.y * pitch - pad;
+    const rw = b.w * pitch + 2 * pad, rh = b.h * pitch + 2 * pad;
+    g.strokeStyle = "rgba(216,155,106,0.35)";
+    g.lineWidth = 5 * dpr;
+    g.strokeRect(rx, ry, rw, rh);
+    g.strokeStyle = "#D89B6A";
+    g.lineWidth = 1.5 * dpr;
+    g.strokeRect(rx, ry, rw, rh);
+    // corner resize handles (small to look at; the pointer hit area is 36 CSS px square)
+    g.fillStyle = "#F5EFE6";
+    const hs = 7 * dpr;
+    for (const [cx, cy] of [[rx, ry], [rx + rw, ry], [rx, ry + rh], [rx + rw, ry + rh]]){
+      g.fillRect(cx - hs / 2, cy - hs / 2, hs, hs);
+    }
+  }
+  window.addEventListener("resize", () => { if (editorOpen) drawOverlay(); });
+
+  // ---------- pointer interaction: select / move / resize / double-tap split ----------
+  let drag = null; // {mode, corner, el, b0, startLX, startLY, idxs, starts, moved}
+  let lastTap = { t: 0, di: -1 };
+
+  function ledPos(ev){
+    const r = stage.getBoundingClientRect();
+    return [(ev.clientX - r.left) / r.width * 64, (ev.clientY - r.top) / r.height * 64, r];
+  }
+  function hitTest(lx, ly){
+    for (const inflate of [0, 3]){ // exact first, then a finger-friendly halo
+      for (let i = working.e.length - 1; i >= 0; i--){ // top-most (drawn last) wins
+        const b = measureEl(working.e[i]);
+        if (lx >= b.x - inflate && lx <= b.x + b.w + inflate && ly >= b.y - inflate && ly <= b.y + b.h + inflate) return i;
+      }
+    }
+    return -1;
+  }
+
+  stage.addEventListener("pointerdown", (ev) => {
+    if (!editorOpen) return;
+    ev.preventDefault();
+    const [lx, ly, r] = ledPos(ev);
+    const cssPitch = r.width / 64;
+    // resize handles first (they sit on top of the element body)
+    const selEl = cur();
+    if (selEl){
+      const b = measureEl(selEl);
+      const pts = [[b.x, b.y, 0], [b.x + b.w, b.y, 1], [b.x, b.y + b.h, 2], [b.x + b.w, b.y + b.h, 3]];
+      for (const [px, py, corner] of pts){
+        if (Math.abs((lx - px) * cssPitch) <= 18 && Math.abs((ly - py) * cssPitch) <= 18){
+          drag = { mode: "resize", corner, el: selEl, b0: b, moved: false };
+          stage.setPointerCapture(ev.pointerId);
+          return;
+        }
+      }
+    }
+    const hit = hitTest(lx, ly);
+    if (hit >= 0){
+      if (sel !== hit){ sel = hit; renderDock(); drawOverlay(); }
+      const el = working.e[sel];
+      const idxs = isConnectedDep(el) ? groupIdx(sel) : [sel];
+      drag = {
+        mode: "move", el, startLX: lx, startLY: ly, idxs,
+        starts: idxs.map(j => ({ x: working.e[j].x | 0, y: working.e[j].y | 0 })),
+        moved: false,
+      };
+      stage.setPointerCapture(ev.pointerId);
+    } else if (sel >= 0){
+      sel = -1;
+      renderDock();
+      drawOverlay();
+    }
+  });
+
+  // Vertical resize steps through the (font, scale) ladder, ordered by pixel height.
+  const LADDER = [[0, 1, 7], [1, 1, 10], [0, 2, 14], [1, 2, 20], [0, 3, 21], [1, 3, 30]];
+  function resizeTo(lx, ly){
+    const el = drag.el, b = drag.b0, t = el.t | 0;
+    const left = drag.corner === 0 || drag.corner === 2;
+    const top = drag.corner === 0 || drag.corner === 1;
+    const anchorX = left ? b.x + b.w : b.x;
+    const anchorY = top ? b.y + b.h : b.y;
+    let changed = false;
+    if (t === 6){
+      const d = GLYPH_DIM[clampI(el.g || 0, 0, 2)];
+      const nk = clampI(Math.round(Math.max(Math.abs(lx - anchorX) / d[0], Math.abs(ly - anchorY) / d[1])), 1, 3);
+      if (nk !== clampI(el.k == null ? 1 : el.k, 1, 3)){ el.k = nk; changed = true; }
+    } else {
+      const wAllowed = t === 0 || t === 2 || t === 3 || t === 4 || t === 5 || (t === 1 && (el.fk | 0) === 1);
+      const rawW = Math.round(Math.abs(lx - anchorX));
+      if (wAllowed && rawW > 0){
+        if (left){
+          const nx = clampI(Math.round(Math.min(lx, anchorX - 1)), 0, 63);
+          const nw = clampI(anchorX - nx, 1, 64);
+          if (nx !== (el.x | 0) || nw !== (el.w | 0)){ el.x = nx; el.w = nw; changed = true; }
+        } else {
+          const nw = clampI(rawW, 1, 64);
+          if (nw !== (el.w | 0)){ el.w = nw; changed = true; }
+        }
+      }
+      if (t !== 5){
+        const desired = Math.abs(ly - anchorY);
+        let best = LADDER[0], bd = Infinity;
+        for (const L of LADDER){ const d2 = Math.abs(L[2] - desired); if (d2 < bd){ bd = d2; best = L; } }
+        if (best[0] !== (el.s | 0) || best[1] !== clampI(el.k == null ? 1 : el.k, 1, 3)){
+          el.s = best[0]; el.k = best[1];
+          if (top) el.y = clampI(anchorY - best[2], 0, 63);
+          changed = true;
+        }
+      }
+    }
+    if (changed){
+      drag.moved = true;
+      clampElement(el);
+      mutated();
+      renderProps(); // keep font/scale/width controls in step while dragging
+    }
+  }
+
+  stage.addEventListener("pointermove", (ev) => {
+    if (!drag) return;
+    ev.preventDefault();
+    const [lx, ly] = ledPos(ev);
+    if (drag.mode === "resize"){ resizeTo(lx, ly); return; }
+    let dx = Math.round(lx - drag.startLX), dy = Math.round(ly - drag.startLY);
+    if (dx === 0 && dy === 0 && !drag.moved) return;
+    // clamp the shared delta so every member of the group stays on-panel
+    let dxLo = -64, dxHi = 64, dyLo = -64, dyHi = 64;
+    drag.idxs.forEach((j, i2) => {
+      const b = measureEl(working.e[j]);
+      const s = drag.starts[i2];
+      dxLo = Math.max(dxLo, -s.x); dxHi = Math.min(dxHi, 64 - b.w - s.x);
+      dyLo = Math.max(dyLo, -s.y); dyHi = Math.min(dyHi, 64 - b.h - s.y);
+    });
+    dx = clampI(dx, dxLo, Math.max(dxLo, dxHi));
+    dy = clampI(dy, dyLo, Math.max(dyLo, dyHi));
+    let changed = false;
+    drag.idxs.forEach((j, i2) => {
+      const el = working.e[j];
+      const nx = clampI(drag.starts[i2].x + dx, 0, 63), ny = clampI(drag.starts[i2].y + dy, 0, 63);
+      if (nx !== (el.x | 0) || ny !== (el.y | 0)){ el.x = nx; el.y = ny; changed = true; }
+    });
+    if (changed){
+      drag.moved = true;
+      mutated();
+      syncPosFields();
+    }
+  });
+
+  stage.addEventListener("pointerup", () => {
+    if (!drag) return;
+    const wasMoved = drag.moved, el = drag.el;
+    drag = null;
+    // double-tap (not a drag) on a connected departure offers the one-way split
+    if (!wasMoved && el && isConnectedDep(el)){
+      const now = Date.now();
+      if (now - lastTap.t < 350 && lastTap.di === (el.di | 0)){
+        lastTap = { t: 0, di: -1 };
+        confirmSplit(el);
+      } else {
+        lastTap = { t: now, di: el.di | 0 };
+      }
+    } else {
+      lastTap = { t: 0, di: -1 };
+    }
+  });
+  stage.addEventListener("pointercancel", () => { drag = null; });
+
+  // ---------- save / clear ----------
+  $("ed-save").addEventListener("click", async () => {
+    if (!dirty) return;
+    const body = serializeLayout(working);
+    if (body.length > BYTES_MAX){
+      edStatus("Layout is too large to save — remove an element.", true);
+      return;
+    }
+    const btn = $("ed-save");
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spin"></span>Saving…`;
+    hideEdStatus();
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const r = await fetch("/layout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        signal: ctrl.signal,
+      });
+      if (!r.ok) throw new Error("bad status");
+      savedLayout = normalizeLayout(JSON.parse(body));
+      dirty = false;
+      await applyChange(() => { cfg.uiMode = 2; }); // the custom layout becomes the active view
+      driver.close();
+      updateThumb();
+      closeEditor();
+      const st = $("ui-status");
+      st.textContent = "Saved — Zügli is updating.";
+      st.className = "note ok";
+    } catch (_) {
+      edStatus("Couldn't reach Zügli — try again.", true);
+    } finally {
+      clearTimeout(timer);
+      btn.textContent = "Save";
+      btn.disabled = !dirty;
+    }
+  });
+
+  $("ed-clear").addEventListener("click", () => {
+    showConfirm("Clear the custom layout? The board goes back to the default view.", "Clear", async () => {
+      hideEdStatus();
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        const r = await fetch("/layout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: '{"v":1,"e":[]}',
+          signal: ctrl.signal,
+        });
+        if (!r.ok) throw new Error("bad status");
+        savedLayout = { v: 1, e: [] };
+        working = { v: 1, e: [] };
+        sel = -1; dirty = false;
+        $("ed-save").disabled = true;
+        applyChange(() => { cfg.uiMode = 0; }); // back to the default view
+        updateThumb();
+        driver.edit(); // the on-panel preview follows the now-empty working copy
+        refreshAll();
+        edStatus("Custom layout cleared.", false);
+      } catch (_) {
+        edStatus("Couldn't reach Zügli — try again.", true);
+      } finally {
+        clearTimeout(timer);
+      }
+    });
+  });
+
+  // ---------- boot: draw the thumbnail, then seed it from the persisted layout ----------
+  updateThumb();
+  fetch("/layout")
+    .then(r => r.json())
+    .then(l => { savedLayout = normalizeLayout(l); updateThumb(); })
+    .catch(() => {});
+})();
 </script>
 </body>
 </html>

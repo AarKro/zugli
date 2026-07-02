@@ -81,10 +81,53 @@ pub struct Config {
     pub reduced_start: u16,
     #[serde(rename = "reducedEnd")]
     pub reduced_end: u16,
-    /// When `true`, the panel shows the single-departure focus view (one connection, big
-    /// countdown) instead of the default board of the next three departures.
-    #[serde(rename = "focusView")]
-    pub focus_view: bool,
+    /// Which view the panel draws for the departures screen: `0` = the default three-departure
+    /// board, `1` = the single-departure focus view, `2` = the user's custom layout (rendered only
+    /// when a non-empty layout is saved; otherwise it falls back to the default board). Held as a
+    /// `u8` rather than an enum so `serde-json-core` round-trips it as a plain integer.
+    #[serde(rename = "uiMode", default)]
+    pub ui_mode: u8,
+    /// Migration shim for the pre-`uiMode` config (commit `3bc2fab`), which stored the focus view
+    /// as a `focusView` boolean. Read from old flash records only and **never serialized**, so it
+    /// disappears the first time the record is rewritten. [`Config::migrate`] folds a legacy
+    /// `focusView:true` into `ui_mode = 1`.
+    #[serde(rename = "focusView", default, skip_serializing)]
+    pub focus_view_legacy: bool,
+}
+
+/// The three-way departures view selected by [`Config::ui_mode`]. `#[repr(u8)]` with explicit
+/// discriminants so `mode as u8` matches the persisted `uiMode` integer exactly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum UiMode {
+    /// The built-in three-departure board.
+    Default = 0,
+    /// The single-departure focus view.
+    Focus = 1,
+    /// The user's custom layout (falls back to [`Default`](Self::Default) when none is saved).
+    Custom = 2,
+}
+
+impl UiMode {
+    /// Map the persisted `u8` to a mode; any unknown value falls back to [`Default`](Self::Default).
+    pub fn from_u8(v: u8) -> Self {
+        match v {
+            1 => Self::Focus,
+            2 => Self::Custom,
+            _ => Self::Default,
+        }
+    }
+}
+
+impl Config {
+    /// Fold a legacy `focusView:true` record forward into `ui_mode = 1` (Focus). A no-op for
+    /// records already carrying `uiMode`. Call once after loading from flash.
+    pub fn migrate(&mut self) {
+        if self.ui_mode == 0 && self.focus_view_legacy {
+            self.ui_mode = 1;
+        }
+        self.focus_view_legacy = false;
+    }
 }
 
 impl Default for Config {
@@ -97,7 +140,145 @@ impl Default for Config {
             off_when_dimmed: false, // dim to 10 % by default, not fully off
             reduced_start: 20 * 60, // 20:00
             reduced_end: 8 * 60,    // 08:00
-            focus_view: false,      // default to the three-departure board
+            ui_mode: 0,             // default to the three-departure board
+            focus_view_legacy: false,
+        }
+    }
+}
+
+/// Largest number of elements a custom layout may hold. A **secondary** sanity bound on the
+/// heapless `Vec`; the authoritative flash bound is [`LAYOUT_MAX_BYTES`] (accented text escapes to
+/// 6-byte `\uXXXX`, so byte count — not element count — is what guarantees the record fits).
+pub const MAX_ELEMENTS: usize = 16;
+
+/// Authoritative flash bound for a serialized custom layout, in bytes (FEATURE_UI_BUILDER §5.5/§6).
+/// A layout is valid only if its serialized JSON is `<=` this. Enforced by the editor (live) and by
+/// the firmware (`POST /layout` / `POST /preview` reject over-budget bodies before any flash write).
+pub const LAYOUT_MAX_BYTES: usize = 1536;
+
+/// Maximum length of a Text element's literal string. Bounds a single field and keeps the storage
+/// unescape buffer sane; the [`LAYOUT_MAX_BYTES`] cap still governs the whole layout.
+pub const MAX_TEXT_LEN: usize = 24;
+
+fn is_zero_u8(v: &u8) -> bool {
+    *v == 0
+}
+fn is_one_u8(v: &u8) -> bool {
+    *v == 1
+}
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+fn str_is_empty(v: &String<MAX_TEXT_LEN>) -> bool {
+    v.is_empty()
+}
+fn one_u8() -> u8 {
+    1
+}
+fn version_default() -> u8 {
+    1
+}
+
+/// The custom board layout (FEATURE_UI_BUILDER §5.3): a schema `v`ersion plus an ordered list of
+/// `e`lements (draw order = array order, later = on top). An empty `e` means "no custom layout";
+/// in Custom [`UiMode`] the renderer then falls back to the built-in board.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Layout {
+    /// Schema version, currently `1`. A newer `v` than the firmware understands is treated as "no
+    /// custom layout" by the renderer rather than mis-rendered.
+    #[serde(default = "version_default")]
+    pub v: u8,
+    /// The elements, in draw order.
+    #[serde(default)]
+    pub e: Vec<Element, MAX_ELEMENTS>,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Self {
+            v: 1,
+            e: Vec::new(),
+        }
+    }
+}
+
+/// One layout element (FEATURE_UI_BUILDER §5.4). A **flat** struct with a numeric type tag `t` and
+/// `#[serde(default)]` optional fields — **not** a data-carrying Rust enum, which `serde-json-core`
+/// deserializes poorly (§5.1). Fields serialize only when they differ from their default, keeping
+/// the common case compact for the flash budget. Type-specific fields are ignored by other types.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Element {
+    /// Type tag: 0=Text, 1=Departure field, 2=Station, 3=Clock, 4=Date, 5=Divider, 6=Icon.
+    pub t: u8,
+    /// Top-left x (0..=63; baseline-top origin for text).
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub x: u8,
+    /// Top-left y (0..=63; the text baseline-top).
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub y: u8,
+    /// Clip/marquee width (text-bearing types) or length (divider). `0` = natural width.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub w: u8,
+    /// Font: 0 = FONT_5X7 (advance 5), 1 = FONT_6X10 (advance 6).
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub s: u8,
+    /// Integer upscale factor, 1..=3 (each source glyph pixel becomes a `k`×`k` block).
+    #[serde(default = "one_u8", skip_serializing_if = "is_one_u8")]
+    pub k: u8,
+    /// Preset colour index: 0 = AMBER, 1 = ACCENT (copper), 2 = DIM. Overridden by `col`.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub c: u8,
+    /// Optional custom colour `0xRRGGBB` (masked to 24 bits). When present, overrides `c`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub col: Option<u32>,
+    /// Alignment: 0 = left, 1 = centre, 2 = right.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub a: u8,
+    /// Text literal (type 0 only).
+    #[serde(default, skip_serializing_if = "str_is_empty")]
+    pub v: String<MAX_TEXT_LEN>,
+    /// Departure slot 0..=2 (type 1 only): the permanent data binding, soonest-first.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub di: u8,
+    /// Departure field 0=badge/1=direction/2=time (type 1 only).
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub fk: u8,
+    /// Split flag (type 1 only): editor grouping state. The **firmware ignores it** — each field is
+    /// drawn at its own `x,y` regardless — so connected/split is purely an editor concern.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub sp: bool,
+    /// Divider thickness, 1..=2 (type 5 only).
+    #[serde(default = "one_u8", skip_serializing_if = "is_one_u8")]
+    pub th: u8,
+    /// Format selector for Clock/Date (types 3/4).
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub f: u8,
+    /// Icon glyph id (type 6 only): 0 = tram-front, 1 = Z-blind, 2 = arrow.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub g: u8,
+}
+
+impl Layout {
+    /// Defensively clamp every numeric field into its valid range (§5.5) so a hand-crafted POST can
+    /// never feed an out-of-range value to the renderer. Element **count** and text length are
+    /// already bounded by the heapless `Vec`/`String` at deserialize time; this bounds the scalars.
+    /// Off-panel elements are left in place — the renderer clips them (`pset`) and skips fully
+    /// off-panel ones — so this only normalizes, it does not drop elements.
+    pub fn sanitize(&mut self) {
+        for el in self.e.iter_mut() {
+            el.x = el.x.min(64);
+            el.y = el.y.min(64);
+            el.w = el.w.min(64);
+            el.s = el.s.min(1);
+            el.k = el.k.clamp(1, 3);
+            el.c = el.c.min(2);
+            el.a = el.a.min(2);
+            el.di = el.di.min(2);
+            el.fk = el.fk.min(2);
+            el.th = el.th.clamp(1, 2);
+            if let Some(rgb) = el.col {
+                el.col = Some(rgb & 0x00FF_FFFF);
+            }
         }
     }
 }

@@ -35,7 +35,9 @@ embassy-sync    = "0.7.0"
 embassy-futures = "0.1.1"
 embedded-io = "0.7.1"
 embedded-io-async = "0.7.0"
-esp-alloc = "0.10.0"
+# `nightly` enables esp-alloc's `core::alloc::Allocator` impls (e.g. `ExternalMemory`) so the custom
+# layout mirror can be `Box`ed into PSRAM via `Box::new_in` — keeping it off internal RAM (shared.rs).
+esp-alloc = { version = "0.10.0", features = ["nightly"] }
 esp-backtrace = { version = "0.19.0", features = [
   "esp32s3",
   "panic-handler",
