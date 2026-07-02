@@ -2,6 +2,30 @@ fn main() {
     linker_be_nice();
     // make sure linkall.x is the last linker script (otherwise might cause problems with flip-link)
     println!("cargo:rustc-link-arg=-Tlinkall.x");
+    gzip_config_page();
+}
+
+/// Pre-compress the config page so `httpd::index` can serve it with `Content-Encoding: gzip`.
+///
+/// The uncompressed page is ~118 KB; blasting all of it through the WiFi stack on a reload
+/// momentarily drained the driver's static TX buffer pool, surfacing as `esp_wifi_internal_tx
+/// returned error: 257` (ESP_ERR_NO_MEM) backpressure while smoltcp retransmitted. Gzip shrinks
+/// it ~5-7×, keeping the burst under that pressure point. The `.gz` lands in `OUT_DIR` and is
+/// `include_bytes!`'d into flash `.rodata`, so it costs no RAM (and less flash than the plaintext).
+fn gzip_config_page() {
+    use std::io::Write as _;
+
+    // build.rs runs with CWD = the package dir (firmware/); the page lives at the repo root.
+    const SRC: &str = "../web/index.html";
+    println!("cargo:rerun-if-changed={SRC}");
+
+    let html = std::fs::read(SRC).expect("build.rs: read ../web/index.html");
+    let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    enc.write_all(&html).expect("build.rs: gzip write");
+    let gz = enc.finish().expect("build.rs: gzip finish");
+
+    let out = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("index.html.gz");
+    std::fs::write(&out, &gz).expect("build.rs: write index.html.gz");
 }
 
 fn linker_be_nice() {

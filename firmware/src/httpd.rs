@@ -21,9 +21,13 @@ use crate::model::{Config as BoardConfig, Layout, Selection};
 use crate::shared::{self, SELECTION, SELECTION_CHANGED};
 use crate::storage::STORE;
 
-/// The config page, embedded into the firmware so it is served even without internet
-/// access for the device itself (the page's own API calls go out over the phone's link).
-const INDEX_HTML: &str = include_str!("../../web/index.html");
+/// The config page, embedded into the firmware so it is served even without internet access for
+/// the device itself (the page's own API calls go out over the phone's link). Stored **gzip-
+/// compressed** (built by build.rs) and served with `Content-Encoding: gzip` — the plaintext page
+/// is ~118 KB, and serving it whole once drained the WiFi driver's static TX buffer pool on a
+/// reload (the `esp_wifi_internal_tx returned error: 257` / NO_MEM backpressure). Compressing it
+/// ~5-7× keeps the burst under that pressure point; the bytes sit in flash `.rodata`, costing no RAM.
+const INDEX_HTML_GZ: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/index.html.gz"));
 
 /// A response body with an explicit content type.
 pub struct Static {
@@ -47,6 +51,26 @@ pub fn html(body: &'static str) -> Static {
     Static {
         content_type: "text/html; charset=utf-8",
         body,
+    }
+}
+
+/// A borrowed-bytes body with an explicit content type — like [`Static`] but for non-UTF-8
+/// payloads (the gzip-compressed config page). Holds only a fat pointer, so picoserve's
+/// response state machine stays cheap (see [`RawJson`]).
+pub struct StaticBytes {
+    pub content_type: &'static str,
+    pub body: &'static [u8],
+}
+
+impl Content for StaticBytes {
+    fn content_type(&self) -> &'static str {
+        self.content_type
+    }
+    fn content_length(&self) -> usize {
+        self.body.len()
+    }
+    async fn write_content<W: Write>(self, mut writer: W) -> Result<(), W::Error> {
+        writer.write_all(self.body).await
     }
 }
 
@@ -98,7 +122,14 @@ impl<const N: usize> Content for OwnedJson<N> {
 }
 
 async fn index() -> impl IntoResponse {
-    Response::ok(html(INDEX_HTML))
+    // Served pre-gzipped (see `INDEX_HTML_GZ`); the browser transparently inflates it. The
+    // `charset=utf-8` describes the *decompressed* body, per HTTP — `Content-Encoding` is the
+    // transfer wrapper, `Content-Type` the underlying media type.
+    Response::ok(StaticBytes {
+        content_type: "text/html; charset=utf-8",
+        body: INDEX_HTML_GZ,
+    })
+    .with_header("Content-Encoding", "gzip")
 }
 
 async fn save(Json(sel): Json<Selection>) -> impl IntoResponse {
