@@ -37,18 +37,26 @@
   h2{color:var(--cream);font-weight:500;font-size:19px;margin:28px 0 12px;}
   /* Full-width tracking-mode switch, directly under the title. Two equal segments; the active
      one is highlighted like a selected connection. */
-  .mode{display:flex;gap:6px;background:var(--surface);border-radius:14px;padding:6px;margin:0 0 4px;}
+  .mode{position:relative;display:flex;gap:6px;background:var(--surface);border-radius:14px;padding:6px;margin:0 0 4px;}
   .mode-opt{
-    flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;
+    flex:1;position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:2px;
     background:transparent;color:var(--muted);border:none;border-radius:10px;
     padding:11px 8px;font-family:inherit;cursor:pointer;min-height:44px;
     text-align:center;line-height:1.15;
   }
   .mode-opt .mt{font-size:15px;font-weight:600;}
   .mode-opt .ms{font-size:11px;}
-  .mode-opt.active{background:var(--selected);}
+  /* Active highlight is drawn by a sliding thumb (see .seg-thumb / slideThumb), not a per-button
+     background, so switching segments animates the highlight between them. */
   .mode-opt.active .mt{color:var(--accent);}
   .mode-opt.active .ms{color:var(--cream);}
+  /* Sliding active-highlight for the .mode and .seg segmented controls. Positioned over the active
+     segment in JS (slideThumb) and transitioned so it glides between states. */
+  .seg-thumb{position:absolute;left:0;top:0;z-index:0;background:var(--selected);border-radius:9px;pointer-events:none;}
+  .mode .seg-thumb{border-radius:10px;}
+  @media (prefers-reduced-motion: no-preference){
+    .seg-thumb{transition:transform .2s ease,width .2s ease,height .2s ease;}
+  }
   .field{
     width:100%;background:var(--cream);color:#1a1410;border:none;border-radius:12px;
     padding:14px 16px;font-size:16px;font-family:inherit;outline:none;
@@ -87,6 +95,10 @@
   .note{margin-top:14px;font-size:15px;}
   .note.err{color:#e08a5a;}
   .note.ok{color:var(--accent);}
+  /* Section divider between the stop/connection group and the board-view group. */
+  .divider{border:none;border-top:1px solid #4a4038;margin:26px 0 0;}
+  /* Breathing room between the tracking-mode toggle and the stop search field below it. */
+  #mode-track{margin-bottom:16px;}
   .spin{display:inline-block;width:15px;height:15px;border:2px solid rgba(14,12,10,.4);
     border-top-color:var(--surface);border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px;margin-right:8px;}
   @keyframes s{to{transform:rotate(360deg);}}
@@ -115,13 +127,14 @@
     max-height:calc(100dvh - env(safe-area-inset-top) - 12px);
     overflow-y:auto;-webkit-overflow-scrolling:touch;
     animation:sheet-up .22s ease-out;
+    transition:transform .25s ease; /* spring back after a drag that doesn't cross the close threshold */
   }
   @keyframes sheet-up{from{transform:translateY(100%);}to{transform:translateY(0);}}
   /* Sticky so the title + close stay reachable while the options scroll underneath. */
   .sheet-head{
-    position:sticky;top:0;z-index:1;background:var(--bg);
+    position:sticky;top:20px;z-index:1;background:var(--bg);
     display:flex;align-items:center;justify-content:space-between;
-    padding:20px 0 10px;margin-bottom:4px;
+    padding:6px 0 10px;margin-bottom:4px;
   }
   .sheet-head h2{margin:0;font-size:20px;color:var(--cream);}
   .sheet-close{background:none;border:none;color:var(--muted);font-size:24px;line-height:1;cursor:pointer;padding:4px 6px;}
@@ -191,35 +204,66 @@
   }
   @keyframes ed-in{from{transform:translateY(4%);opacity:0;}to{transform:none;opacity:1;}}
   @keyframes dock-in{from{transform:translateY(6px);opacity:0;}to{transform:none;opacity:1;}}
-  .ed-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;}
+  /* Title is absolutely centred over the bar so it stays centred no matter how wide the
+     Back link (left) or Save button (right) are. */
+  .ed-bar{position:relative;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;}
   .ed-cancel{
-    flex:none;width:44px;height:44px;background:none;border:none;border-radius:12px;
-    color:var(--muted);font-size:26px;line-height:1;cursor:pointer;
+    flex:none;min-height:44px;padding:0 8px 0 4px;background:none;border:none;border-radius:12px;
+    display:flex;align-items:center;gap:2px;
+    color:var(--muted);font-family:inherit;font-size:16px;font-weight:500;line-height:1;cursor:pointer;
   }
+  .ed-cancel svg{display:block;width:22px;height:22px;fill:currentColor;}
   .ed-cancel:active{background:var(--surface);}
-  .ed-title{flex:1;text-align:center;font-size:17px;font-weight:600;color:var(--cream);}
+  .ed-title{
+    position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    text-align:center;font-size:17px;font-weight:600;color:var(--cream);pointer-events:none;
+  }
   .ed-save{
     flex:none;min-height:44px;padding:0 20px;border:none;border-radius:12px;
     background:var(--accent);color:var(--surface);font-family:inherit;font-size:16px;font-weight:600;cursor:pointer;
   }
   .ed-save[disabled]{opacity:.45;cursor:default;}
   .ed-note{margin:0;padding:2px 20px 6px;font-size:14px;text-align:center;}
-  .ed-body{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:4px 16px 12px;overflow:hidden;}
+  /* The board sits just under the bar ("as high as it can go"); the dock is an absolute overlay
+     (see .ed-dock) so ed-body always keeps its full height and the board is never squeezed/clipped
+     when the properties sheet opens — the sheet slides over the board instead. */
+  .ed-body{flex:1;min-height:0;display:flex;align-items:flex-start;justify-content:center;padding:4px 16px 12px;overflow:hidden;}
   .ed-bezel{background:#0a0a0a;border-radius:14px;padding:10px;width:min(100%,384px);}
   @media (max-height:660px){ .ed-bezel{width:min(100%,300px);} }
+  /* Where supported, cap the board to the smaller of ed-body's width/height so it always fits both
+     dimensions (e.g. landscape) with no clipping. Guarded so browsers without container-query units
+     keep the plain width above. */
+  @supports (width:100cqmin){
+    .ed-body{container-type:size;}
+    .ed-bezel{width:min(100%,384px,100cqmin);}
+  }
   .ed-stage{position:relative;width:100%;aspect-ratio:1/1;touch-action:none;}
   .ed-stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block;}
   .ed-empty{
     position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     margin:0;padding:24px;text-align:center;color:var(--muted);font-size:14px;pointer-events:none;
   }
-  /* Bottom dock: palette of add-chips when nothing is selected, properties sheet otherwise. */
+  /* Bottom dock: palette of add-chips when nothing is selected, properties sheet otherwise.
+     Absolutely anchored to the editor's bottom edge so it floats OVER the board (a real bottom
+     sheet) rather than pushing the board up — and it can be dragged down by its grip to dismiss. */
   .ed-dock{
+    position:absolute;left:0;right:0;bottom:0;z-index:2;
     background:var(--surface);border-radius:18px 18px 0 0;
-    padding:12px 16px calc(14px + env(safe-area-inset-bottom));
-    max-height:46dvh;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    padding:0 16px calc(14px + env(safe-area-inset-bottom));
+    max-height:58dvh;overflow-y:auto;-webkit-overflow-scrolling:touch;
     box-shadow:0 -8px 30px rgba(0,0,0,.4);
+    transition:transform .25s ease;
   }
+  /* Grab-handle affordance at the very top of a sheet; also the drag target that closes it. */
+  .sheet-grip{
+    position:sticky;top:0;z-index:3;height:20px;
+    display:flex;align-items:center;justify-content:center;
+    cursor:grab;touch-action:none;
+  }
+  .sheet-grip:active{cursor:grabbing;}
+  .sheet-grip::before{content:"";width:38px;height:4px;border-radius:999px;background:#4a4038;}
+  .sheet .sheet-grip{background:var(--bg);}
+  .ed-dock .sheet-grip{background:var(--surface);}
   .ed-chips{display:flex;gap:8px;overflow-x:auto;padding:2px;scrollbar-width:none;}
   .ed-chips::-webkit-scrollbar{display:none;}
   .ed-chip{
@@ -234,9 +278,12 @@
     color:#e08a5a;font-family:inherit;font-size:15px;font-weight:500;cursor:pointer;
   }
   .ed-clear:disabled{opacity:.35;cursor:default;}
-  .ed-props-head{display:flex;align-items:center;gap:4px;}
+  /* Sticky under the grip (20px) so the element title + back/delete icons stay put while the
+     properties below scroll. */
+  .ed-props-head{position:sticky;top:20px;z-index:2;background:var(--surface);display:flex;align-items:center;gap:4px;}
   .ed-back{
-    flex:none;width:44px;height:44px;background:none;border:none;border-radius:12px;
+    flex:none;width:44px;height:44px;display:flex;align-items:center;justify-content:center;
+    background:none;border:none;border-radius:12px;
     color:var(--muted);font-size:26px;line-height:1;cursor:pointer;
   }
   .ed-props-title{flex:1;font-size:16px;font-weight:600;color:var(--cream);}
@@ -254,12 +301,13 @@
     flex:1;min-width:0;max-width:240px;min-height:44px;background:var(--cream);color:#1a1410;
     border:none;border-radius:10px;padding:0 12px;font-family:inherit;font-size:16px;outline:none;
   }
-  .seg{display:flex;gap:4px;background:#1a1510;border-radius:12px;padding:3px;}
+  .seg{position:relative;display:flex;gap:4px;background:#1a1510;border-radius:12px;padding:3px;}
   .seg button{
-    min-width:44px;min-height:44px;padding:0 10px;background:transparent;border:none;border-radius:9px;
+    position:relative;z-index:1;min-width:44px;min-height:44px;padding:0 10px;background:transparent;border:none;border-radius:9px;
     color:var(--muted);font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;
   }
-  .seg button.on{background:var(--selected);color:var(--accent);}
+  /* Active state coloured here; the .selected fill is the sliding .seg-thumb (see slideThumb). */
+  .seg button.on{color:var(--accent);}
   /* Colour swatches use the real panel palette (filled in from ZugliPanel in JS). */
   .swatches{display:flex;gap:10px;}
   .sw{
@@ -310,6 +358,7 @@
 
 <div id="settings" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
   <div class="sheet">
+    <div class="sheet-grip" id="settings-grip" aria-hidden="true"></div>
     <div class="sheet-head">
       <h2 id="settings-title">Settings</h2>
       <button id="settings-close" class="sheet-close" aria-label="Close">&times;</button>
@@ -388,8 +437,11 @@
 <div class="wrap">
   <h1>Zügli</h1>
 
+  <!-- State 1/2: stop search + autocomplete. The tracking-mode switch sits directly under the
+       heading so "where to look" and "what to track" read as one group. -->
+  <h2>Where should Zügli look?</h2>
   <!-- Tracking mode: pick specific connections, or show the whole stop. Spans the full width. -->
-  <div class="mode" role="tablist" aria-label="What Zügli tracks">
+  <div class="mode" id="mode-track" role="tablist" aria-label="What Zügli tracks">
     <button class="mode-opt active" id="mode-specific" role="tab" aria-selected="true">
       <span class="mt">Specific connections</span>
       <span class="ms">Pick the lines to track</span>
@@ -399,9 +451,6 @@
       <span class="ms">Everything at the stop</span>
     </button>
   </div>
-
-  <!-- State 1/2: stop search + autocomplete -->
-  <h2>Where should Zügli look?</h2>
   <div class="search-wrap">
     <input class="field" id="stop" type="text" placeholder="Search a stop…" autocomplete="off" spellcheck="false">
     <div class="dropdown hidden" id="results"></div>
@@ -422,11 +471,14 @@
     <p class="note hidden" id="status"></p>
   </div>
 
+  <!-- Light divider separating the stop/connection group above from the board-view group below. -->
+  <hr class="divider">
+
   <!-- M5: which view the board shows — the built-in three-row board, the focus view, or the
        user's own layout. Mirrors cfg.uiMode; tapping Custom with no saved layout opens the
        editor instead (Custom only becomes active once a layout is saved). -->
   <h2>Board view</h2>
-  <div class="mode" role="tablist" aria-label="Board view">
+  <div class="mode" id="mode-view" role="tablist" aria-label="Board view">
     <button class="mode-opt active" id="ui-mode-0" role="tab" aria-selected="true">
       <span class="mt">Default</span>
       <span class="ms">Three departures</span>
@@ -476,7 +528,10 @@
      ================================================================================ -->
 <div id="editor" class="editor hidden" role="dialog" aria-modal="true" aria-labelledby="ed-title">
   <div class="ed-bar">
-    <button id="ed-cancel" class="ed-cancel" aria-label="Cancel">&times;</button>
+    <button id="ed-cancel" class="ed-cancel" aria-label="Back to main view">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20z"/></svg>
+      Back
+    </button>
     <span class="ed-title" id="ed-title">Board layout</span>
     <button id="ed-save" class="ed-save" disabled>Save</button>
   </div>
@@ -491,6 +546,7 @@
     </div>
   </div>
   <div class="ed-dock">
+    <div class="sheet-grip" id="ed-grip" aria-hidden="true"></div>
     <div id="ed-palette">
       <div class="ed-chips" id="ed-chips">
         <button class="ed-chip" data-add="text"><span class="plus">+</span>Text</button>
@@ -511,6 +567,10 @@
         <button class="ed-del" id="ed-del" aria-label="Delete element">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-3 6h12l-.9 11.1a2 2 0 0 1-2 1.9H8.9a2 2 0 0 1-2-1.9L6 9Zm4 2v9h1.5v-9H10Zm3.5 0v9H15v-9h-1.5Z"/></svg>
         </button>
+      </div>
+      <div class="prow prow-col hidden" id="pr-split">
+        <button class="ed-secondary" id="ed-split">Split into separate fields</button>
+        <span class="psub">Badge, direction and time then move on their own.</span>
       </div>
       <div class="prow" id="pr-text">
         <label class="plabel" for="ed-text">Text</label>
@@ -599,10 +659,6 @@
           <input id="ed-w" type="number" inputmode="numeric" min="0" max="64" aria-label="Width">
           <button data-nudge="w" data-d="1" aria-label="Wider by one LED">+</button>
         </span>
-      </div>
-      <div class="prow prow-col hidden" id="pr-split">
-        <button class="ed-secondary" id="ed-split">Split into separate fields</button>
-        <span class="psub">Badge, direction and time then move on their own. This can't be undone.</span>
       </div>
     </div>
   </div>
@@ -898,6 +954,66 @@ if (typeof globalThis !== "undefined") {
 const API = "https://transport.opendata.ch/v1";
 const $ = (id) => document.getElementById(id);
 
+// Slide the active-segment highlight (a .seg-thumb absolutely positioned inside a segmented
+// control) over `activeEl`. Shared by the main-page .mode toggles and the editor's .seg groups.
+// The thumb is created lazily as the container's first child; buttons sit above it (z-index).
+window.slideThumb = function(container, activeEl){
+  if (!container) return;
+  let thumb = container.__thumb;
+  if (!thumb){
+    thumb = document.createElement("span");
+    thumb.className = "seg-thumb";
+    thumb.style.opacity = "0";
+    container.insertBefore(thumb, container.firstChild);
+    container.__thumb = thumb;
+  }
+  // offsetParent is null while the control (or an ancestor) is display:none — leave the thumb
+  // hidden until it's laid out, then it snaps into place the first time it's shown.
+  if (!activeEl || !activeEl.offsetParent){ thumb.style.opacity = "0"; return; }
+  const firstShow = thumb.style.opacity === "0";
+  if (firstShow) thumb.style.transition = "none"; // don't glide in from the corner on first paint
+  thumb.style.width = activeEl.offsetWidth + "px";
+  thumb.style.height = activeEl.offsetHeight + "px";
+  thumb.style.transform = `translate(${activeEl.offsetLeft}px, ${activeEl.offsetTop}px)`;
+  thumb.style.opacity = "1";
+  if (firstShow){ void thumb.offsetWidth; thumb.style.transition = ""; }
+};
+// Position a .mode toggle's thumb over its currently-active option.
+function refreshModeThumb(container){
+  if (container) window.slideThumb(container, container.querySelector(".mode-opt.active"));
+}
+
+// Make a bottom sheet closable by dragging its grip down. `sheetEl` is the element that slides;
+// `grip` is the drag handle (the only start target, so buttons in the sheet keep working). Past
+// `threshold` px the drag calls `onDismiss` (gated by an optional `canDismiss`); otherwise the
+// sheet springs back via its CSS transform transition.
+window.dragToDismiss = function(sheetEl, grip, opts){
+  if (!sheetEl || !grip) return;
+  opts = opts || {};
+  const threshold = opts.threshold || 90;
+  let startY = 0, dy = 0, pid = null;
+  grip.addEventListener("pointerdown", (ev) => {
+    pid = ev.pointerId; startY = ev.clientY; dy = 0;
+    sheetEl.style.transition = "none";
+    try { grip.setPointerCapture(pid); } catch (_){}
+  });
+  grip.addEventListener("pointermove", (ev) => {
+    if (ev.pointerId !== pid) return;
+    dy = Math.max(0, ev.clientY - startY);
+    sheetEl.style.transform = dy ? `translateY(${dy}px)` : "";
+  });
+  const finish = (ev) => {
+    if (ev.pointerId !== pid) return;
+    pid = null;
+    const dismiss = dy > threshold && (!opts.canDismiss || opts.canDismiss());
+    sheetEl.style.transition = "";   // re-enable the CSS spring-back
+    sheetEl.style.transform = "";
+    if (dismiss && opts.onDismiss) opts.onDismiss();
+  };
+  grip.addEventListener("pointerup", finish);
+  grip.addEventListener("pointercancel", finish);
+};
+
 const MAX_CONNS = 6;         // mirrors firmware `model::MAX_CONNS`
 let selectedStop = null;     // {id, name}
 let selectedConns = [];      // [{line, category, destination}] — the picked connections
@@ -911,6 +1027,7 @@ function setMode(all){
   $("mode-all").classList.toggle("active", all);
   $("mode-specific").setAttribute("aria-selected", String(!all));
   $("mode-all").setAttribute("aria-selected", String(all));
+  refreshModeThumb($("mode-track"));
   if (all){
     // Whole stop: no per-line choice — jump straight to the save button once a stop is picked.
     $("conn-section").classList.add("hidden");
@@ -939,6 +1056,33 @@ function updateSpecificSave(){
 }
 $("mode-specific").addEventListener("click", () => setMode(false));
 $("mode-all").addEventListener("click", () => setMode(true));
+
+// On first open, restore the saved main-page state from the device (chosen stop, tracking mode and
+// picked connections). The settings sheet and custom layout restore separately from /config and
+// /layout; this covers the rest so the page reflects what Zügli is currently showing.
+async function restoreSelection(){
+  try {
+    const r = await fetch("/selection");
+    const s = await r.json();
+    if (!s || !s.stopName) return; // nothing saved yet — leave the form blank
+    selectedStop = { id: String(s.stopId || ""), name: s.stopName };
+    $("stop").value = s.stopName;
+    const all = !!s.allConnections;
+    allConnections = all;
+    $("mode-specific").classList.toggle("active", !all);
+    $("mode-all").classList.toggle("active", all);
+    $("mode-specific").setAttribute("aria-selected", String(!all));
+    $("mode-all").setAttribute("aria-selected", String(all));
+    refreshModeThumb($("mode-track"));
+    if (all){
+      showSave();
+    } else if (selectedStop.id){
+      // Re-fetch the live board and pre-select the saved lines (those still departing this stop).
+      loadConnections(selectedStop.id, (s.connections || []).map(connKey));
+    }
+  } catch (_) { /* device unreachable or no selection — leave the form blank */ }
+}
+restoreSelection();
 
 // ---------- stop autocomplete (phone → API directly, brief §6.1) ----------
 let debounce;
@@ -984,7 +1128,9 @@ function chooseStop(s){
 }
 
 // ---------- connection list (brief §6.2: stationboard, dedupe by number+to) ----------
-async function loadConnections(stopId){
+// `preselect` (optional) is a list of connKey()s to mark selected once the board loads — used to
+// restore the saved connections when the page first opens.
+async function loadConnections(stopId, preselect){
   const sec = $("conn-section");
   sec.classList.remove("hidden");
   $("conns").innerHTML = `<p class="note muted">Loading connections…</p>`;
@@ -1003,7 +1149,7 @@ async function loadConnections(stopId){
       seen.add(key);
       conns.push({ line, category: e.category || "", destination: dest });
     }
-    renderConnections(conns);
+    renderConnections(conns, preselect);
   } catch (_) {
     $("conns").innerHTML = `<p class="note err">Couldn't load connections — try again.</p>`;
   }
@@ -1018,14 +1164,14 @@ function isRail(cat){
 // Stable key for a connection (line + destination), used to track which rows are picked.
 function connKey(c){ return c.line + "→" + c.destination; }
 
-function renderConnections(conns){
+function renderConnections(conns, preselect){
   if (allConnections) return; // mode switched while this stop's board was loading — ignore it
   const box = $("conns");
   box.innerHTML = "";
   selectedConns = [];
-  updateSpecificSave();
-  if (!conns.length){ $("conn-empty").classList.remove("hidden"); return; }
+  if (!conns.length){ updateSpecificSave(); $("conn-empty").classList.remove("hidden"); return; }
   $("conn-empty").classList.add("hidden");
+  const pre = new Set(preselect || []);
   conns.forEach(c => {
     const row = document.createElement("div");
     row.className = "conn";
@@ -1035,9 +1181,15 @@ function renderConnections(conns){
     const arrow = document.createElement("span"); arrow.className = "arrow"; arrow.textContent = "→";
     const dest = document.createElement("span"); dest.className = "dest"; dest.textContent = c.destination;
     row.append(badge, arrow, dest);
+    // Restore a previously-saved pick (up to the cap) so the list opens with it already selected.
+    if (pre.has(connKey(c)) && selectedConns.length < MAX_CONNS){
+      selectedConns.push({ line: c.line, category: c.category, destination: c.destination });
+      row.classList.add("selected");
+    }
     row.onclick = () => toggleConnection(c, row);
     box.appendChild(row);
   });
+  updateSpecificSave();
 }
 
 function resetConnections(){
@@ -1127,6 +1279,7 @@ function renderConfig(){
     seg.classList.toggle("active", (cfg.uiMode | 0) === i);
     seg.setAttribute("aria-selected", String((cfg.uiMode | 0) === i));
   }
+  refreshModeThumb($("mode-view"));
   // Let the UI-builder script refresh anything of its own that mirrors cfg (thumbnail, editor sim).
   if (window.zugliConfigChanged) window.zugliConfigChanged();
   brightRange.value = cfg.brightness;
@@ -1155,6 +1308,8 @@ $("gear").addEventListener("click", openSettings);
 $("settings-close").addEventListener("click", closeSettings);
 // Tap the dim backdrop (outside the sheet) to dismiss.
 sheet.addEventListener("click", (e) => { if (e.target === sheet) closeSettings(); });
+// Drag the grip down to dismiss the settings sheet.
+window.dragToDismiss(sheet.querySelector(".sheet"), $("settings-grip"), { onDismiss: closeSettings });
 
 // Apply a control change: snapshot, mutate, push the whole config, and revert the UI on failure.
 async function applyChange(mutate){
@@ -1189,6 +1344,9 @@ startTime.addEventListener("change", () => { if (startTime.value) applyChange(()
 endTime.addEventListener("change", () => { if (endTime.value) applyChange(() => { cfg.reducedEnd = toMin(endTime.value); }); });
 
 renderConfig(); // reflect defaults until the board's real config loads
+refreshModeThumb($("mode-track")); // place the tracking-mode highlight (renderConfig does mode-view)
+// Segment widths change with the viewport, so re-place both main-page thumbs on resize.
+window.addEventListener("resize", () => { refreshModeThumb($("mode-track")); refreshModeThumb($("mode-view")); });
 
 // M5: the main-page mode selector needs the board's real uiMode right away, so load /config
 // up front instead of waiting for the settings sheet to be opened for the first time.
@@ -1745,11 +1903,16 @@ fetch("/config")
   // ---------- dock: properties sheet ----------
   function show(id, on){ $(id).classList.toggle("hidden", !on); }
   function segMark(rootId, val){
+    let active = null;
     $(rootId).querySelectorAll("button").forEach(b => {
       const on = +b.dataset.v === val;
       b.classList.toggle("on", on);
       b.setAttribute("aria-pressed", String(on));
+      if (on) active = b;
     });
+    // Slide the highlight over the active button (see slideThumb). The props sheet is already
+    // un-hidden by renderProps before segMark runs, so the button is laid out and positionable.
+    window.slideThumb($(rootId), active);
   }
   const presetInt = (c) => (c === 1 ? P.ACCENT : c === 2 ? P.DIM : P.AMBER);
   const hex6 = (n) => "#" + (n & 0xFFFFFF).toString(16).padStart(6, "0");
@@ -1770,6 +1933,10 @@ fetch("/config")
     if (!el){ renderDock(); return; }
     const t = el.t | 0;
     const textLike = t === 0 || t === 1 || t === 2 || t === 3 || t === 4;
+    // Reveal the props sheet up front so the seg rows below are laid out — slideThumb (called from
+    // segMark) needs a visible, measured button to position the sliding highlight over.
+    $("ed-palette").classList.add("hidden");
+    $("ed-props").classList.remove("hidden");
     $("ed-props-title").textContent = elName(el);
     show("pr-text", t === 0);
     if (t === 0 && document.activeElement !== $("ed-text")) $("ed-text").value = el.v || "";
@@ -1797,11 +1964,14 @@ fetch("/config")
       $("ps-w").textContent = t === 5 ? "0 = to the right edge" : "0 = fit the text";
     }
     show("pr-split", t === 1 && !el.sp);
-    $("ed-palette").classList.add("hidden");
-    $("ed-props").classList.remove("hidden");
   }
 
-  $("ed-back").addEventListener("click", () => { sel = -1; renderDock(); drawOverlay(); });
+  function deselect(){ sel = -1; renderDock(); drawOverlay(); }
+  $("ed-back").addEventListener("click", deselect);
+  // Drag the dock's grip down to close the properties sheet (back to the palette). Only dismissable
+  // while an element is selected — in the palette base state the drag just springs back.
+  window.dragToDismiss($("editor").querySelector(".ed-dock"), $("ed-grip"),
+    { canDismiss: () => sel >= 0, onDismiss: deselect });
 
   $("ed-text").addEventListener("input", () => {
     const el = cur();

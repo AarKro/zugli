@@ -166,6 +166,16 @@ async fn set_config(Json(cfg): Json<BoardConfig>) -> impl IntoResponse {
     Response::ok(json("{\"ok\":true}"))
 }
 
+/// Shared scratch for the borrowed-slice JSON responses ([`get_layout`], [`get_selection`]). Sized
+/// for the larger user (`Layout`, `LAYOUT_MAX_BYTES` ≈ 1.5 KB); a worst-case `Selection` serializes
+/// to well under 1 KB, so it fits with headroom. Reusing one buffer keeps `.bss` flat instead of
+/// adding a second ~1 KB static — the RAM budget is knife-edge (the poll TLS path shares the core-0
+/// stack). SAFETY: `config_server_task` serves a single connection at a time, so each handler
+/// serializes into this buffer and fully writes the borrowed slice out before the next request is
+/// accepted — never concurrent access, and the `&mut` for the write is dropped before the borrow.
+static mut JSON_TX_BUF: [u8; crate::model::LAYOUT_MAX_BYTES] =
+    [0u8; crate::model::LAYOUT_MAX_BYTES];
+
 /// The persisted custom layout as JSON, for the editor to seed its working copy and for the
 /// main-page thumbnail. Returns `{"v":1,"e":[]}` when no layout is saved.
 async fn get_layout() -> impl IntoResponse {
@@ -175,16 +185,34 @@ async fn get_layout() -> impl IntoResponse {
     }
     .unwrap_or_default(); // Layout::default() serializes to {"v":1,"e":[]}
 
-    // Serialize into a shared static buffer and serve a borrowed slice (see `RawJson` for why owned
-    // responses blow the memory budget). SAFETY: `config_server_task` serves a single connection at
-    // a time, so this buffer is written and then read (during this response) entirely within one
-    // `get_layout` call before the next request is accepted — never concurrent access. The `&mut`
-    // used for the write is dropped before the shared borrow handed to `RawJson`.
-    static mut LAYOUT_TX_BUF: [u8; crate::model::LAYOUT_MAX_BYTES] =
-        [0u8; crate::model::LAYOUT_MAX_BYTES];
-    let ptr = core::ptr::addr_of_mut!(LAYOUT_TX_BUF);
+    // Serialize into the shared static buffer and serve a borrowed slice (see `RawJson`/`JSON_TX_BUF`
+    // for why owned responses blow the memory budget).
+    let ptr = core::ptr::addr_of_mut!(JSON_TX_BUF);
     let len = serde_json_core::to_slice(&layout, unsafe { &mut *ptr }).unwrap_or(0);
     Response::ok(RawJson(unsafe { core::slice::from_raw_parts(ptr as *const u8, len) }))
+}
+
+/// The current panel selection as JSON, so the config page can restore its main-page state (chosen
+/// stop, tracking mode, picked connections) the first time it opens — the settings sheet and custom
+/// layout already pre-fill from `/config` and `/layout`. Mirrors the `POST /save` body shape.
+/// Returns `{}` when nothing is selected yet, which the page reads as "leave the form blank".
+async fn get_selection() -> impl IntoResponse {
+    // Clone out of the live mirror (seeded from flash at boot, updated on every save) so the lock is
+    // released before serializing, and the clone is dropped before the response's write `.await`.
+    let selection = { SELECTION.lock().await.clone() };
+    let ptr = core::ptr::addr_of_mut!(JSON_TX_BUF);
+    let bytes: &'static [u8] = match selection {
+        Some(sel) => {
+            let len = serde_json_core::to_slice(&sel, unsafe { &mut *ptr }).unwrap_or(0);
+            if len == 0 {
+                b"{}" // over-budget serialize (won't happen for a valid Selection) → degrade to blank
+            } else {
+                unsafe { core::slice::from_raw_parts(ptr as *const u8, len) }
+            }
+        }
+        None => b"{}",
+    };
+    Response::ok(RawJson(bytes))
 }
 
 /// Persist a custom layout (FEATURE_UI_BUILDER §7.4). Clamps every field to its valid range; an
@@ -263,6 +291,7 @@ pub async fn config_server_task(stack: Stack<'static>) {
     let app = Router::new()
         .route("/", get(index))
         .route("/save", post(save))
+        .route("/selection", get(get_selection))
         .route("/config", get(get_config).post(set_config))
         .route("/layout", get(get_layout).post(set_layout))
         .route("/preview", post(set_preview))
