@@ -1870,14 +1870,17 @@ fetch("/config")
     $("ed-full").classList.toggle("hidden", !full);
     $("ed-clear").disabled = !savedLayout.e.length;
   }
+  // Show the add-palette and hide the properties sheet. Used for the base (nothing-selected) dock
+  // state, and to tuck the sheet away the moment an element starts being dragged — a move gesture
+  // must never leave the properties sheet open; it opens only on a tap (see the pointer handlers).
+  function closeProps(){
+    $("ed-props").classList.add("hidden");
+    $("ed-palette").classList.remove("hidden");
+    updatePalette();
+  }
   function renderDock(){
-    if (sel < 0){
-      $("ed-props").classList.add("hidden");
-      $("ed-palette").classList.remove("hidden");
-      updatePalette();
-    } else {
-      renderProps();
-    }
+    if (sel < 0) closeProps();
+    else renderProps();
   }
 
   $("ed-chips").addEventListener("click", (ev) => {
@@ -2198,7 +2201,14 @@ fetch("/config")
     }
     const hit = hitTest(lx, ly);
     if (hit >= 0){
-      if (sel !== hit){ sel = hit; renderDock(); drawOverlay(); }
+      // Select the element (for the overlay outline + drag), but DON'T open the properties sheet
+      // here — opening waits for a tap (a pointerup with no movement) so dragging never pops it up.
+      // If the sheet already happens to be open, just keep its contents in step with the new pick.
+      if (sel !== hit){
+        sel = hit;
+        drawOverlay();
+        if (!$("ed-props").classList.contains("hidden")) renderProps();
+      }
       const el = working.e[sel];
       const idxs = isConnectedDep(el) ? groupIdx(sel) : [sel];
       drag = {
@@ -2283,6 +2293,7 @@ fetch("/config")
       if (nx !== (el.x | 0) || ny !== (el.y | 0)){ el.x = nx; el.y = ny; changed = true; }
     });
     if (changed){
+      if (!drag.moved) closeProps(); // first real movement → this is a drag, not a tap: hide the sheet
       drag.moved = true;
       mutated();
       syncPosFields();
@@ -2291,8 +2302,10 @@ fetch("/config")
 
   stage.addEventListener("pointerup", () => {
     if (!drag) return;
-    const wasMoved = drag.moved, el = drag.el;
+    const wasMoved = drag.moved, el = drag.el, wasMove = drag.mode === "move";
     drag = null;
+    // A tap — pressing an element without dragging it — is what opens the properties sheet.
+    if (wasMove && !wasMoved && sel >= 0) renderProps();
     // double-tap (not a drag) on a connected departure offers the one-way split
     if (!wasMoved && el && isConnectedDep(el)){
       const now = Date.now();
