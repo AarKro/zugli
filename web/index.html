@@ -2262,10 +2262,10 @@ fetch("/config")
       }
     }
     if (changed){
+      if (!drag.moved) closeProps(); // first real movement → this is a scale, not a tap: hide the sheet
       drag.moved = true;
       clampElement(el);
       mutated();
-      renderProps(); // keep font/scale/width controls in step while dragging
     }
   }
 
@@ -2302,10 +2302,11 @@ fetch("/config")
 
   stage.addEventListener("pointerup", () => {
     if (!drag) return;
-    const wasMoved = drag.moved, el = drag.el, wasMove = drag.mode === "move";
+    const wasMoved = drag.moved, el = drag.el;
     drag = null;
-    // A tap — pressing an element without dragging it — is what opens the properties sheet.
-    if (wasMove && !wasMoved && sel >= 0) renderProps();
+    // A tap — pressing an element (body or corner) without moving it — is what opens the
+    // properties sheet. Dragging or scaling never pops it up (see closeProps above).
+    if (!wasMoved && sel >= 0) renderProps();
     // double-tap (not a drag) on a connected departure offers the one-way split
     if (!wasMoved && el && isConnectedDep(el)){
       const now = Date.now();
