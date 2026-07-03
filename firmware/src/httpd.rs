@@ -19,7 +19,7 @@ use picoserve::{Config, Router, Timeouts};
 
 use crate::model::{Config as BoardConfig, Layout, Selection};
 use crate::shared::{self, SELECTION, SELECTION_CHANGED};
-use crate::storage::STORE;
+use crate::storage::{self, STORE};
 
 /// The config page, embedded into the firmware so it is served even without internet access for
 /// the device itself (the page's own API calls go out over the phone's link). Stored **gzip-
@@ -29,40 +29,19 @@ use crate::storage::STORE;
 /// ~5-7× keeps the burst under that pressure point; the bytes sit in flash `.rodata`, costing no RAM.
 const INDEX_HTML_GZ: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/index.html.gz"));
 
-/// A response body with an explicit content type.
-pub struct Static {
-    pub content_type: &'static str,
-    pub body: &'static str,
-}
-
-impl Content for Static {
-    fn content_type(&self) -> &'static str {
-        self.content_type
-    }
-    fn content_length(&self) -> usize {
-        self.body.len()
-    }
-    async fn write_content<W: Write>(self, mut writer: W) -> Result<(), W::Error> {
-        writer.write_all(self.body.as_bytes()).await
-    }
-}
-
-pub fn html(body: &'static str) -> Static {
-    Static {
-        content_type: "text/html; charset=utf-8",
-        body,
-    }
-}
-
-/// A borrowed-bytes body with an explicit content type — like [`Static`] but for non-UTF-8
-/// payloads (the gzip-compressed config page). Holds only a fat pointer, so picoserve's
-/// response state machine stays cheap (see [`RawJson`]).
-pub struct StaticBytes {
+/// A **borrowed** response body with an explicit content type. This is the workhorse response
+/// type for a memory-budget reason (VERIFY.md M0): picoserve's response state machine keeps ~20
+/// by-value copies of the `Content` in the handler's future, so a `Body` (one fat pointer, 16 B)
+/// costs ~320 B where an owned `String<1536>` or a serde-`Json<Layout>` would inflate the task's
+/// future by ~20–30 KB of `.bss` — starving the shared core-0 stack the poll TLS path runs on.
+/// Big JSON is therefore serialized synchronously into a static buffer ([`raw_json`]) and only
+/// the borrowed bytes cross the `.await`.
+pub struct Body {
     pub content_type: &'static str,
     pub body: &'static [u8],
 }
 
-impl Content for StaticBytes {
+impl Content for Body {
     fn content_type(&self) -> &'static str {
         self.content_type
     }
@@ -74,36 +53,23 @@ impl Content for StaticBytes {
     }
 }
 
-pub fn json(body: &'static str) -> Static {
-    Static {
-        content_type: "application/json",
-        body,
+pub fn html(body: &'static str) -> Body {
+    Body {
+        content_type: "text/html; charset=utf-8",
+        body: body.as_bytes(),
     }
 }
 
-/// A JSON response for a `Layout`, serialized with **serde-json-core** (a synchronous call) rather
-/// than picoserve's `response::Json`. picoserve's serializer drives a serde `Serialize` into an
-/// *async* writer, so serializing a deep type (`Layout` = `Vec<Element, 16>` of 15-field structs)
-/// keeps the whole recursive serialize state in the handler's future — ~22 KB of `.bss` that steals
-/// from the core-0 stack the poll TLS path needs. Here the serialize happens synchronously into a
-/// stack buffer and only the bytes are written across the `.await`, so the future stays small.
-/// A JSON response whose body is a **borrowed** byte slice. Holds only a fat pointer (16 B), so
-/// picoserve's response state machine — which keeps ~20 by-value copies of the `Content` in its
-/// future — costs ~320 B instead of ~20× the body size. (An owned `String<1536>` or a `Layout`
-/// held here inflates this task's future by ~20–30 KB of `.bss`, starving the shared core-0 stack
-/// the poll TLS path runs on.) The bytes must outlive the response; see [`get_layout`].
-struct RawJson(&'static [u8]);
+pub fn json(body: &'static str) -> Body {
+    Body {
+        content_type: "application/json",
+        body: body.as_bytes(),
+    }
+}
 
-impl Content for RawJson {
-    fn content_type(&self) -> &'static str {
-        "application/json"
-    }
-    fn content_length(&self) -> usize {
-        self.0.len()
-    }
-    async fn write_content<W: Write>(self, mut writer: W) -> Result<(), W::Error> {
-        writer.write_all(self.0).await
-    }
+/// The `{"ok":true}` acknowledgement every mutating endpoint returns.
+fn ok() -> Body {
+    json("{\"ok\":true}")
 }
 
 /// A small owned-body JSON response, for endpoints whose body is built at runtime.
@@ -125,7 +91,7 @@ async fn index() -> impl IntoResponse {
     // Served pre-gzipped (see `INDEX_HTML_GZ`); the browser transparently inflates it. The
     // `charset=utf-8` describes the *decompressed* body, per HTTP — `Content-Encoding` is the
     // transfer wrapper, `Content-Type` the underlying media type.
-    Response::ok(StaticBytes {
+    Response::ok(Body {
         content_type: "text/html; charset=utf-8",
         body: INDEX_HTML_GZ,
     })
@@ -139,22 +105,13 @@ async fn save(Json(sel): Json<Selection>) -> impl IntoResponse {
         if sel.all_connections { "all" } else { "specific" },
         sel.connections.len(),
     );
-    // Persist to flash, update the live selection, and wake the poll task. Log the persist
-    // result: if this fails the selection still works this session (set in memory below) but
-    // is lost on reboot — exactly the "polling doesn't start after restart" symptom.
-    {
-        let mut guard = STORE.lock().await;
-        match guard.as_mut() {
-            Some(store) => match store.save_selection(&sel) {
-                Ok(()) => info!("save: selection persisted to flash"),
-                Err(()) => log::error!("save: FLASH SAVE FAILED (selection won't survive reboot)"),
-            },
-            None => log::error!("save: no flash store (selection won't survive reboot)"),
-        }
-    }
+    // Persist to flash, update the live selection, and wake the poll task. A failed persist
+    // still works this session (set in memory below) but is lost on reboot — exactly the
+    // "polling doesn't start after restart" symptom the persist log calls out.
+    storage::persist("selection", |s| s.save_selection(&sel)).await;
     *SELECTION.lock().await = Some(sel);
     SELECTION_CHANGED.signal(());
-    Response::ok(json("{\"ok\":true}"))
+    Response::ok(ok())
 }
 
 /// Current board settings, for the config page's settings sheet to pre-fill its controls.
@@ -182,19 +139,10 @@ async fn set_config(Json(cfg): Json<BoardConfig>) -> impl IntoResponse {
         "config: stripCity={} showLineBadges={} brightness={} autoBrightness={} offWhenDimmed={} reduced={}..{} uiMode={}",
         cfg.strip_city, cfg.show_line_badges, cfg.brightness, cfg.auto_brightness, cfg.off_when_dimmed, cfg.reduced_start, cfg.reduced_end, cfg.ui_mode
     );
-    {
-        let mut guard = STORE.lock().await;
-        match guard.as_mut() {
-            Some(store) => match store.save_config(&cfg) {
-                Ok(()) => info!("config: persisted to flash"),
-                Err(()) => log::error!("config: FLASH SAVE FAILED (setting won't survive reboot)"),
-            },
-            None => log::error!("config: no flash store (setting won't survive reboot)"),
-        }
-    }
+    storage::persist("config", |s| s.save_config(&cfg)).await;
     shared::apply_config(&cfg);
     SELECTION_CHANGED.signal(()); // wake the poll task so the panel redraws now
-    Response::ok(json("{\"ok\":true}"))
+    Response::ok(ok())
 }
 
 /// Shared scratch for the borrowed-slice JSON responses ([`get_layout`], [`get_selection`]). Sized
@@ -207,6 +155,23 @@ async fn set_config(Json(cfg): Json<BoardConfig>) -> impl IntoResponse {
 static mut JSON_TX_BUF: [u8; crate::model::LAYOUT_MAX_BYTES] =
     [0u8; crate::model::LAYOUT_MAX_BYTES];
 
+/// Serialize `value` into [`JSON_TX_BUF`] with **serde-json-core** (a synchronous call) and hand
+/// out the borrowed slice as a [`Body`]. Serializing synchronously matters as much as borrowing:
+/// picoserve's own `response::Json` drives serde into an *async* writer, so a deep type's whole
+/// recursive serialize state would live in the handler's future (~22 KB of `.bss` for a `Layout`).
+/// An over-budget serialize (can't happen for values that respect the schema bounds) degrades to
+/// `{}` rather than failing the request.
+fn raw_json<T: serde::Serialize>(value: &T) -> Body {
+    let ptr = core::ptr::addr_of_mut!(JSON_TX_BUF);
+    let len = serde_json_core::to_slice(value, unsafe { &mut *ptr }).unwrap_or(0);
+    let body: &'static [u8] = if len == 0 {
+        b"{}"
+    } else {
+        unsafe { core::slice::from_raw_parts(ptr as *const u8, len) }
+    };
+    Body { content_type: "application/json", body }
+}
+
 /// The persisted custom layout as JSON, for the editor to seed its working copy and for the
 /// main-page thumbnail. Returns `{"v":1,"e":[]}` when no layout is saved.
 async fn get_layout() -> impl IntoResponse {
@@ -215,12 +180,7 @@ async fn get_layout() -> impl IntoResponse {
         guard.as_mut().and_then(|s| s.load_layout())
     }
     .unwrap_or_default(); // Layout::default() serializes to {"v":1,"e":[]}
-
-    // Serialize into the shared static buffer and serve a borrowed slice (see `RawJson`/`JSON_TX_BUF`
-    // for why owned responses blow the memory budget).
-    let ptr = core::ptr::addr_of_mut!(JSON_TX_BUF);
-    let len = serde_json_core::to_slice(&layout, unsafe { &mut *ptr }).unwrap_or(0);
-    Response::ok(RawJson(unsafe { core::slice::from_raw_parts(ptr as *const u8, len) }))
+    Response::ok(raw_json(&layout))
 }
 
 /// The current panel selection as JSON, so the config page can restore its main-page state (chosen
@@ -231,19 +191,10 @@ async fn get_selection() -> impl IntoResponse {
     // Clone out of the live mirror (seeded from flash at boot, updated on every save) so the lock is
     // released before serializing, and the clone is dropped before the response's write `.await`.
     let selection = { SELECTION.lock().await.clone() };
-    let ptr = core::ptr::addr_of_mut!(JSON_TX_BUF);
-    let bytes: &'static [u8] = match selection {
-        Some(sel) => {
-            let len = serde_json_core::to_slice(&sel, unsafe { &mut *ptr }).unwrap_or(0);
-            if len == 0 {
-                b"{}" // over-budget serialize (won't happen for a valid Selection) → degrade to blank
-            } else {
-                unsafe { core::slice::from_raw_parts(ptr as *const u8, len) }
-            }
-        }
-        None => b"{}",
-    };
-    Response::ok(RawJson(bytes))
+    Response::ok(match selection {
+        Some(sel) => raw_json(&sel),
+        None => json("{}"),
+    })
 }
 
 /// Persist a custom layout (FEATURE_UI_BUILDER §7.4). Clamps every field to its valid range; an
@@ -262,22 +213,13 @@ async fn set_layout(Json(mut layout): Json<Layout>) -> impl IntoResponse {
     // An empty layout means "no custom layout" — stored as `None` so it and a never-saved layout
     // are indistinguishable on disk (and in Custom mode both fall back to the built-in board).
     let empty = layout.e.is_empty();
-    {
-        let mut guard = STORE.lock().await;
-        let stored = if empty { None } else { Some(&layout) };
-        match guard.as_mut() {
-            Some(store) => match store.save_layout(stored) {
-                Ok(()) => info!("layout: persisted ({} elements)", layout.e.len()),
-                Err(()) => log::error!("layout: FLASH SAVE FAILED (over-budget or no flash)"),
-            },
-            None => log::error!("layout: no flash store (won't survive reboot)"),
-        }
-    }
+    info!("layout: saving ({} elements)", layout.e.len());
+    storage::persist("layout", |s| s.save_layout(if empty { None } else { Some(&layout) })).await;
     warn_low_heap("layout");
     shared::apply_layout(if empty { None } else { Some(layout) });
     shared::end_preview(); // a save supersedes any in-flight preview (§7.4); no-op if none active
     SELECTION_CHANGED.signal(()); // wake the render/poll path so the panel redraws now
-    Response::ok(json("{\"ok\":true}"))
+    Response::ok(ok())
 }
 
 /// Push a **transient** live preview of the working layout (FEATURE_UI_BUILDER §7.4 / §4.3).
@@ -305,18 +247,51 @@ async fn set_preview(Json(mut layout): Json<Layout>) -> impl IntoResponse {
     layout.sanitize();
     warn_low_heap("preview");
     shared::set_preview(layout);
-    Response::ok(json("{\"ok\":true}"))
+    Response::ok(ok())
 }
 
 /// End the live preview (editor Cancel; harmless after Save): drop the transient layout and revert
 /// the panel to the device's persisted UI mode + layout (§7.4).
 async fn end_preview() -> impl IntoResponse {
     shared::end_preview();
-    Response::ok(json("{\"ok\":true}"))
+    Response::ok(ok())
 }
 
-/// Serve the config page + `/save` on port 80. Handles one connection at a time, so the
-/// task simply re-listens after each connection closes.
+/// Run a picoserve HTTP server on port 80, forever — the loop shared by this config server and
+/// the captive-portal setup server. Handles one connection at a time, re-listening after each
+/// connection closes.
+///
+/// The buffers live in the calling task's future (its static embassy arena), which sits in `.bss`
+/// and so pushes down the core-0 main-task stack floor (`_stack_end_cpu0`) — where the poll task's
+/// TLS handshake + stationboard JSON parse run and are already near the limit (see poll.rs /
+/// commit 78c5126). Keep them at the proven sizes: http_buf 2048 holds a realistic `/layout` body
+/// (~0.5 KB, worst-case valid ~1.5 KB) plus headers, and tcp_rx 1024 windows a larger body across
+/// segments.
+pub async fn serve<P: picoserve::routing::PathRouter>(
+    app: &Router<P>,
+    name: &'static str,
+    stack: Stack<'static>,
+) -> ! {
+    let config = Config::new(Timeouts {
+        start_read_request: Duration::from_secs(10),
+        persistent_start_read_request: Duration::from_secs(5),
+        read_request: Duration::from_secs(10),
+        write: Duration::from_secs(10),
+    });
+
+    let mut tcp_rx = [0u8; 1024];
+    let mut tcp_tx = [0u8; 4096];
+    let mut http_buf = [0u8; 2048];
+
+    loop {
+        let _ = picoserve::Server::new(app, &config, &mut http_buf)
+            .listen_and_serve(name, stack, 80, &mut tcp_rx, &mut tcp_tx)
+            .await;
+    }
+}
+
+/// Serve the config page + `/save` on port 80. Stays up the whole time the device runs
+/// (brief §2 "config stays live").
 #[embassy_executor::task]
 pub async fn config_server_task(stack: Stack<'static>) {
     let app = Router::new()
@@ -327,25 +302,5 @@ pub async fn config_server_task(stack: Stack<'static>) {
         .route("/layout", get(get_layout).post(set_layout))
         .route("/preview", post(set_preview))
         .route("/preview/end", post(end_preview));
-    let config = Config::new(Timeouts {
-        start_read_request: Duration::from_secs(10),
-        persistent_start_read_request: Duration::from_secs(5),
-        read_request: Duration::from_secs(10),
-        write: Duration::from_secs(10),
-    });
-
-    // These live in the task's static arena, which sits in `.bss` and so pushes down the core-0
-    // main-task stack floor (`_stack_end_cpu0`) — where the poll task's TLS handshake + stationboard
-    // JSON parse run and are already near the limit (see poll.rs / commit 78c5126). Keep them at the
-    // proven sizes: http_buf 2048 holds a realistic `/layout` body (~0.5 KB, worst-case valid
-    // ~1.5 KB) plus headers, and tcp_rx 1024 windows a larger body across segments.
-    let mut tcp_rx = [0u8; 1024];
-    let mut tcp_tx = [0u8; 4096];
-    let mut http_buf = [0u8; 2048];
-
-    loop {
-        let _ = picoserve::Server::new(&app, &config, &mut http_buf)
-            .listen_and_serve("config", stack, 80, &mut tcp_rx, &mut tcp_tx)
-            .await;
-    }
+    serve(&app, "config", stack).await
 }

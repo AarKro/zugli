@@ -23,11 +23,11 @@ use log::{info, warn};
 use picoserve::extract::Json;
 use picoserve::response::{IntoResponse, Response};
 use picoserve::routing::{get, post};
-use picoserve::{Config, Router, Timeouts};
+use picoserve::Router;
 
 use crate::httpd::{html, json};
 use crate::model::WifiCreds;
-use crate::storage::STORE;
+use crate::storage;
 use crate::wifi::{self, WifiDevice};
 use esp_radio::wifi::sta::StationConfig;
 use esp_radio::wifi::{AuthenticationMethod, Config as WifiConfig, WifiController};
@@ -138,14 +138,8 @@ pub async fn portal_wifi_task(mut controller: WifiController<'static>) {
 
                 if ok {
                     info!("portal: joined; saving creds + rebooting");
-                    let saved = {
-                        let mut guard = STORE.lock().await;
-                        guard.as_mut().map(|s| s.save_wifi(&creds))
-                    };
-                    match saved {
-                        Some(Ok(())) => info!("portal: creds saved to flash"),
-                        _ => warn!("portal: FLASH SAVE FAILED — will fall back to portal"),
-                    }
+                    // A failed save is non-fatal: the reboot then lands back in the portal.
+                    storage::persist("portal: wifi creds", |s| s.save_wifi(&creds)).await;
                     Timer::after(Duration::from_secs(1)).await;
                     esp_hal::system::software_reset();
                 } else {
@@ -322,21 +316,7 @@ pub async fn setup_server_task(stack: Stack<'static>) {
         .route("/connecttest.txt", get(setup_index))
         .route("/scan", get(scan_handler))
         .route("/connect", post(connect_handler));
-    let config = Config::new(Timeouts {
-        start_read_request: Duration::from_secs(10),
-        persistent_start_read_request: Duration::from_secs(5),
-        read_request: Duration::from_secs(10),
-        write: Duration::from_secs(10),
-    });
-
-    let mut tcp_rx = [0u8; 1024];
-    let mut tcp_tx = [0u8; 4096];
-    let mut http_buf = [0u8; 2048];
-    loop {
-        let _ = picoserve::Server::new(&app, &config, &mut http_buf)
-            .listen_and_serve("portal", stack, 80, &mut tcp_rx, &mut tcp_tx)
-            .await;
-    }
+    crate::httpd::serve(&app, "portal", stack).await
 }
 
 /// Create the static IPv4 config for the SoftAP (192.168.4.1/24).

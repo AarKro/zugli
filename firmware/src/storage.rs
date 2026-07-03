@@ -170,8 +170,12 @@ impl Store {
         self.write_record(STORE_SECTOR, MAGIC, all)
     }
 
-    pub fn load_wifi(&mut self) -> Option<WifiCreds> {
-        self.read_all().wifi
+    /// Everything needed at boot — `(wifi, selection, config, layout)` — read from flash in one
+    /// pass instead of one `read_all` per field. The config comes back already migrated.
+    pub fn load_boot(&mut self) -> (Option<WifiCreds>, Option<Selection>, Config, Option<Layout>) {
+        let mut all = self.read_all();
+        all.config.migrate(); // fold a legacy `focusView:true` record into `uiMode = 1`
+        (all.wifi, all.selection, all.config, all.layout)
     }
 
     pub fn save_wifi(&mut self, creds: &WifiCreds) -> Result<(), ()> {
@@ -180,32 +184,15 @@ impl Store {
         self.write_all(&all)
     }
 
-    /// Clear WiFi credentials only, leaving the saved selection intact.
-    pub fn clear_wifi(&mut self) -> Result<(), ()> {
-        let mut all = self.read_all();
-        all.wifi = None;
-        self.write_all(&all)
-    }
-
     /// Wipe everything — WiFi credentials *and* the saved connection (UC3, brief §7.9).
     pub fn clear_all(&mut self) -> Result<(), ()> {
         self.write_all(&Persisted::default())
-    }
-
-    pub fn load_selection(&mut self) -> Option<Selection> {
-        self.read_all().selection
     }
 
     pub fn save_selection(&mut self, sel: &Selection) -> Result<(), ()> {
         let mut all = self.read_all();
         all.selection = Some(sel.clone());
         self.write_all(&all)
-    }
-
-    pub fn load_config(&mut self) -> Config {
-        let mut cfg = self.read_all().config;
-        cfg.migrate(); // fold a legacy `focusView:true` record into `uiMode = 1`
-        cfg
     }
 
     pub fn save_config(&mut self, cfg: &Config) -> Result<(), ()> {
@@ -232,4 +219,18 @@ pub async fn init(flash_periph: FLASH<'static>) -> Result<(), ()> {
     let store = Store::new(flash_periph)?;
     *STORE.lock().await = Some(store);
     Ok(())
+}
+
+/// Lock the global [`STORE`] and run one save on it, logging the outcome uniformly. A failure is
+/// deliberately non-fatal: the in-memory state the caller sets alongside still applies for this
+/// session, it just won't survive a reboot — which is exactly what the error message says.
+pub async fn persist(tag: &str, save: impl FnOnce(&mut Store) -> Result<(), ()>) {
+    let mut guard = STORE.lock().await;
+    match guard.as_mut() {
+        Some(store) => match save(store) {
+            Ok(()) => info!("{tag}: persisted to flash"),
+            Err(()) => log::error!("{tag}: FLASH SAVE FAILED (won't survive reboot)"),
+        },
+        None => log::error!("{tag}: no flash store (won't survive reboot)"),
+    }
 }
