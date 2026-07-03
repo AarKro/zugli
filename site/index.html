@@ -204,6 +204,9 @@
   .hscroll-btn:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-2px);}
   .hscroll-btn:active{background:rgba(184,118,72,.12);}
   @media(hover:none){.hscroll-btns{display:none;}}
+  /* Once the viewport is wide enough to show all cards at once, the gallery
+     no longer scrolls, so the drag hint and arrows are just noise. */
+  @media(min-width:1040px){.hscroll-controls{display:none;}}
 
   /* ---------- how it works ---------- */
   .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(18px,2.4vw,24px);margin-top:clamp(36px,6vw,54px);}
