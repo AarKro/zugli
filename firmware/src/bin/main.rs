@@ -115,27 +115,15 @@ async fn main(spawner: Spawner) -> ! {
     let rng = Rng::new();
     let seed = ((rng.random() as u64) << 32) | rng.random() as u64;
 
-    // --- Load persisted state ---
-    let creds = {
+    // --- Load persisted state (one flash read for all of it) ---
+    let (creds, selection, config, layout) = {
         let mut g = STORE.lock().await;
-        g.as_mut().and_then(|s| s.load_wifi())
+        g.as_mut().map(|s| s.load_boot()).unwrap_or_default()
     };
-    let selection = {
-        let mut g = STORE.lock().await;
-        g.as_mut().and_then(|s| s.load_selection())
-    };
-    // Apply persisted board settings (brightness, auto-dim, hide-city) before anything renders.
-    let config = {
-        let mut g = STORE.lock().await;
-        g.as_mut().map(|s| s.load_config()).unwrap_or_default()
-    };
+    // Apply persisted board settings (brightness, auto-dim, hide-city) before anything renders,
+    // and seed the live custom-layout mirror so Custom mode has its layout ready from the first
+    // departures render (FEATURE_UI_BUILDER §7.6).
     shared::apply_config(&config);
-    // Seed the live custom-layout mirror from flash before the first departures render, so Custom
-    // mode has its layout ready (FEATURE_UI_BUILDER §7.6).
-    let layout = {
-        let mut g = STORE.lock().await;
-        g.as_mut().and_then(|s| s.load_layout())
-    };
     shared::apply_layout(layout);
     info!(
         "boot: loaded from flash — wifi creds {}, selection {}",

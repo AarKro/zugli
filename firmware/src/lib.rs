@@ -16,6 +16,7 @@ extern crate alloc;
 
 pub mod display;
 pub mod httpd;
+pub mod localtime;
 pub mod mdns;
 pub mod model;
 pub mod poll;
