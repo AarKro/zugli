@@ -7,6 +7,8 @@
 use core::fmt::Write as _;
 
 use embedded_graphics::mono_font::iso_8859_1::{FONT_5X7, FONT_6X10};
+use embedded_graphics::prelude::*;
+use embedded_graphics::primitives::Rectangle;
 use esp_hub75::Color;
 use heapless::String;
 
@@ -31,7 +33,7 @@ pub(super) fn draw_provisioning(fb: &mut FBType, frame: u32) -> bool {
     left(fb, "then open:", 2, 42, dim);
     // Fixed SoftAP address, always wider than the panel, so it scrolls as a marquee. Returns
     // whether it's scrolling so the render loop keeps ticking frames.
-    draw_marquee(fb, "zugli.local or 192.168.4.1", 2, 50, COLS as i32 - 2, accent, 5, frame)
+    draw_marquee(fb, "zugli.local or 192.168.4.1", 2, 50, COLS as i32 - 2, accent, frame)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -93,7 +95,7 @@ fn bogie(fb: &mut FBType, ox: i32, lx: i32, ly: i32) {
 /// Draw one frame of the connecting animation. Always returns `true` (always animating).
 pub(super) fn draw_connecting(fb: &mut FBType, frame: u32) -> bool {
     // Label at the top so the user knows what's happening while WiFi comes up.
-    centered(fb, "Connecting", 6, style(&FONT_5X7, AMBER), 5);
+    centered(fb, "Connecting", 6, style(&FONT_5X7, AMBER));
     draw_tram_scene(fb, frame);
     true
 }
@@ -193,7 +195,7 @@ pub(super) fn draw_idle(fb: &mut FBType, octets: [u8; 4], frame: u32) -> bool {
     );
     // The combined line is always wider than the panel, so it scrolls as a marquee (clip-safe;
     // never crashes). Returns whether it's scrolling so the render loop keeps ticking frames.
-    draw_marquee(fb, addr.as_str(), 2, 42, COLS as i32 - 2, accent, 5, frame)
+    draw_marquee(fb, addr.as_str(), 2, 42, COLS as i32 - 2, accent, frame)
 }
 
 /// Offline fallback: the same rolling-tram scene as [`draw_connecting`], but labelled "offline /
@@ -201,8 +203,8 @@ pub(super) fn draw_idle(fb: &mut FBType, octets: [u8; 4], frame: u32) -> bool {
 /// loop keeps ticking frames (and cuts straight over once a poll succeeds).
 pub(super) fn draw_offline(fb: &mut FBType, frame: u32) -> bool {
     let label = style(&FONT_5X7, AMBER);
-    centered(fb, "offline", 4, label, 5);
-    centered(fb, "reconnecting", 13, label, 5);
+    centered(fb, "offline", 4, label);
+    centered(fb, "reconnecting", 13, label);
     draw_tram_scene(fb, frame);
     true
 }
@@ -223,12 +225,12 @@ pub(super) fn draw_departures(
 ) -> bool {
     // Top: the stop we're watching, scrolling if its full name is too wide.
     let scroll_station =
-        draw_marquee(fb, city(station), 1, 0, COLS as i32 - 2, style(&FONT_6X10, AMBER), 6, frame);
+        draw_marquee(fb, city(station), 1, 0, COLS as i32 - 2, style(&FONT_6X10, AMBER), frame);
     rule(fb, 11, ACCENT);
 
     if deps.is_empty() {
         // Online, but nothing tracked is departing right now (poll yields empty `deps`).
-        centered(fb, "no service", 32, style(&FONT_5X7, DIM), 5);
+        centered(fb, "no service", 32, style(&FONT_5X7, DIM));
         return scroll_station;
     }
 
@@ -272,16 +274,13 @@ pub(super) fn draw_departures(
         let dest_x = badge_end + 2;
         let dest_avail = time_x - 2 - dest_x;
         if dest_avail > 0 {
+            let band = Rectangle::new(Point::new(dest_x, ry), Size::new(dest_avail as u32, ROW_H as u32));
             scrolling |= draw_marquee_clipped(
                 fb,
                 city(dep.destination.as_str()),
-                dest_x,
+                band,
                 text_y,
-                dest_avail,
-                ry,
-                ROW_H,
                 style(&FONT_5X7, AMBER),
-                5,
                 frame,
             );
         }
@@ -306,7 +305,7 @@ pub(super) fn draw_focus(
     let Some(next) = deps.first() else {
         // Online, but nothing tracked is departing — same message as the board, vertically centred
         // now that there's no heading above it.
-        centered(fb, "no service", 28, style(&FONT_5X7, DIM), 5);
+        centered(fb, "no service", 28, style(&FONT_5X7, DIM));
         return scrolling;
     };
 
@@ -316,16 +315,14 @@ pub(super) fn draw_focus(
     let dest_x = badge_end + 2;
     let dest_avail = COLS as i32 - 1 - dest_x;
     if dest_avail > 0 {
+        // Clip band: the 11 px identity row, from the badge's end to the panel edge.
+        let band = Rectangle::new(Point::new(dest_x, 1), Size::new(dest_avail as u32, 11));
         scrolling |= draw_marquee_clipped(
             fb,
             city(next.destination.as_str()),
-            dest_x,
+            band,
             4,
-            dest_avail,
-            1,
-            11,
             style(&FONT_5X7, AMBER),
-            5,
             frame,
         );
     }
@@ -346,7 +343,7 @@ pub(super) fn draw_focus(
             ("in", style(&FONT_5X7, DIM)),
             (mins.as_str(), style(&FONT_5X7, ACCENT)),
         ];
-        scrolling |= draw_segments_row(fb, &segs, 1, 57, COLS as i32 - 2, 5, 4, frame);
+        scrolling |= draw_segments_row(fb, &segs, 1, 57, COLS as i32 - 2, 4, frame);
     }
 
     scrolling

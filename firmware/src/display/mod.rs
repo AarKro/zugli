@@ -65,16 +65,14 @@ fn current_brightness() -> u32 {
         return base;
     };
     let local_min = local_minutes(unix);
-    if in_window(local_min, crate::shared::reduced_start_min(), crate::shared::reduced_end_min()) {
-        // Inside the window: either dim to the low level, or turn the panel fully off (0 %, every
-        // colour scales to black) when the user opted for that.
-        if crate::shared::off_when_dimmed_enabled() {
-            0
-        } else {
-            REDUCED_BRIGHTNESS
-        }
-    } else {
-        base
+    let in_reduced_window =
+        in_window(local_min, crate::shared::reduced_start_min(), crate::shared::reduced_end_min());
+    match (in_reduced_window, crate::shared::off_when_dimmed_enabled()) {
+        (false, _) => base,
+        // Inside the window: turn the panel fully off (0 % — every colour scales to black) when
+        // the user opted for that, else dim to the low level.
+        (true, true) => 0,
+        (true, false) => REDUCED_BRIGHTNESS,
     }
 }
 

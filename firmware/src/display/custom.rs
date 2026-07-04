@@ -7,6 +7,7 @@
 //! defensive: out-of-range fields are clamped and a hostile POST can never panic the render task.
 
 use core::fmt::Write as _;
+use core::ops::Range;
 
 use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::mono_font::iso_8859_1::{FONT_5X7, FONT_6X10};
@@ -22,7 +23,7 @@ use crate::localtime::local_parts;
 use crate::model::{Element, Layout};
 
 use super::draw::{
-    blit_bitmap, city, draw_badge, draw_train_front_scaled, fill_rect, fmt_minutes, pset,
+    blit_bitmap, blit_cell, city, draw_badge, draw_train_front_scaled, fill_rect, fmt_minutes,
     ARROW_GLYPH, Z_GLYPH,
 };
 use super::{marquee_offset, ACCENT, AMBER, COLS, DIM, FBType, MARQUEE_GAP, OFF};
@@ -31,13 +32,11 @@ use super::{marquee_offset, ACCENT, AMBER, COLS, DIM, FBType, MARQUEE_GAP, OFF};
 /// `c` (0 = AMBER, 1 = ACCENT, 2 = DIM). The result still passes through `scaled()` at draw time
 /// (via `pset`/`fill_rect`) like every other colour, so custom colours dim with the panel.
 fn elem_color(el: &Element) -> Color {
-    match el.col {
-        Some(rgb) => Color::new((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8),
-        None => match el.c {
-            1 => ACCENT,
-            2 => DIM,
-            _ => AMBER,
-        },
+    match (el.col, el.c) {
+        (Some(rgb), _) => Color::new((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8),
+        (None, 1) => ACCENT,
+        (None, 2) => DIM,
+        (None, _) => AMBER,
     }
 }
 
@@ -52,12 +51,14 @@ fn font_for(s: u8) -> &'static MonoFont<'static> {
 /// built-in board (and to the simulator). Reading the font atlas via `GetPixel` would be O(atlas)
 /// per pixel; this draws each glyph once instead.
 struct GlyphCanvas {
-    lit: [[bool; 6]; 10],
+    /// Which canvas cells the rasterised glyph lights up, indexed `[y][x]` — a 1-bit image of
+    /// the glyph, before scaling.
+    lit_pixels: [[bool; 6]; 10],
 }
 
 impl GlyphCanvas {
     fn new() -> Self {
-        Self { lit: [[false; 6]; 10] }
+        Self { lit_pixels: [[false; 6]; 10] }
     }
 }
 
@@ -79,28 +80,28 @@ impl DrawTarget for GlyphCanvas {
         // reaches here belongs to the glyph — the colour value itself is irrelevant.
         for Pixel(p, _) in pixels {
             if (0..6).contains(&p.x) && (0..10).contains(&p.y) {
-                self.lit[p.y as usize][p.x as usize] = true;
+                self.lit_pixels[p.y as usize][p.x as usize] = true;
             }
         }
         Ok(())
     }
 }
 
-/// Draw `text` at baseline-top `(x0, y)` in `font`, upscaled by integer `k` (each source glyph
-/// pixel becomes a `k×k` block), clipped to the horizontal band `[clip_x0, clip_x1)`. Advance per
-/// glyph is `char_w × k`, matching the frozen metrics. Glyphs fully outside the clip are skipped.
-#[allow(clippy::too_many_arguments)] // a layout helper: font, scale, colour and clip band all matter
-fn blit_scaled_text(
-    fb: &mut FBType,
-    text: &str,
-    x0: i32,
-    y: i32,
+/// Font, integer upscale factor and colour of a piece of scaled custom text — grouped so
+/// [`blit_scaled_text`]'s signature stays readable and one style can serve several blit calls
+/// (the two wrapped copies of a marquee).
+#[derive(Clone, Copy)]
+struct GlyphStyle {
     font: &'static MonoFont<'static>,
     k: i32,
     color: Color,
-    clip_x0: i32,
-    clip_x1: i32,
-) {
+}
+
+/// Draw `text` at baseline-top `(x0, y)` in `style` (each source glyph pixel becomes a `k×k`
+/// block), clipped to the horizontal band of columns `clip`. Advance per glyph is `char_w × k`,
+/// matching the frozen metrics. Glyphs fully outside the clip are skipped.
+fn blit_scaled_text(fb: &mut FBType, text: &str, x0: i32, y: i32, style: &GlyphStyle, clip: Range<i32>) {
+    let GlyphStyle { font, k, color } = *style;
     let cw = font.character_size.width as i32;
     let ch = font.character_size.height as i32;
     let on = MonoTextStyleBuilder::new()
@@ -110,22 +111,15 @@ fn blit_scaled_text(
     let mut x = x0;
     for c in text.chars() {
         // Only rasterise glyphs that overlap the clip band.
-        if x + cw * k > clip_x0 && x < clip_x1 {
+        if x + cw * k > clip.start && x < clip.end {
             let mut canvas = GlyphCanvas::new();
             let mut buf = [0u8; 4];
             let s = c.encode_utf8(&mut buf);
             let _ = Text::with_baseline(s, Point::zero(), on, Baseline::Top).draw(&mut canvas);
             for gy in 0..ch {
                 for gx in 0..cw {
-                    if canvas.lit[gy as usize][gx as usize] {
-                        for sy in 0..k {
-                            for sx in 0..k {
-                                let px = x + gx * k + sx;
-                                if px >= clip_x0 && px < clip_x1 {
-                                    pset(fb, px, y + gy * k + sy, color);
-                                }
-                            }
-                        }
+                    if canvas.lit_pixels[gy as usize][gx as usize] {
+                        blit_cell(fb, x + gx * k, y + gy * k, k, color, &clip);
                     }
                 }
             }
@@ -139,13 +133,14 @@ fn blit_scaled_text(
 /// sits flush, aligned within the box; otherwise, when `allow_marquee`, it scrolls as a marquee
 /// (same cadence as the board) clipped to `[x, x+w)`. Returns `true` while it is scrolling.
 fn place_text(fb: &mut FBType, text: &str, el: &Element, allow_marquee: bool, frame: u32) -> bool {
-    let font = font_for(el.s);
-    let cw = font.character_size.width as i32;
-    let k = (el.k as i32).clamp(1, 3);
+    let style = GlyphStyle {
+        font: font_for(el.s),
+        k: (el.k as i32).clamp(1, 3),
+        color: elem_color(el),
+    };
     let x = el.x as i32;
     let y = el.y as i32;
-    let color = elem_color(el);
-    let text_w = text.chars().count() as i32 * cw * k;
+    let text_w = text.chars().count() as i32 * style.font.character_size.width as i32 * style.k;
     let avail = if el.w > 0 { el.w as i32 } else { text_w };
     let fits = text_w <= avail;
     if fits || !allow_marquee {
@@ -160,14 +155,14 @@ fn place_text(fb: &mut FBType, text: &str, el: &Element, allow_marquee: bool, fr
             0
         };
         // Clip to the box only when one is given (`w > 0`); a natural-width element is unbounded.
-        let (c0, c1) = if el.w > 0 { (x, x + avail) } else { (i32::MIN, i32::MAX) };
-        blit_scaled_text(fb, text, x + off, y, font, k, color, c0, c1);
+        let clip = if el.w > 0 { x..x + avail } else { i32::MIN..i32::MAX };
+        blit_scaled_text(fb, text, x + off, y, &style, clip);
         false
     } else {
         let period = text_w + MARQUEE_GAP;
         let offset = marquee_offset(period, frame);
-        blit_scaled_text(fb, text, x - offset, y, font, k, color, x, x + avail);
-        blit_scaled_text(fb, text, x - offset + period, y, font, k, color, x, x + avail);
+        blit_scaled_text(fb, text, x - offset, y, &style, x..x + avail);
+        blit_scaled_text(fb, text, x - offset + period, y, &style, x..x + avail);
         true
     }
 }
@@ -214,42 +209,40 @@ fn draw_dep_field(
     }
 }
 
-/// Clock element (`t=3`): the local time, `HH:MM` (`f=0`, zero-padded) or `H:MM` (`f=1`). Static —
-/// never forces animation; it refreshes on the `BRIGHTNESS_REFRESH_SECS` static-screen wake.
-fn draw_clock(fb: &mut FBType, el: &Element) -> bool {
-    // Before SNTP has synced there is no local time, so the element draws nothing.
+/// Shared body of the Clock and Date elements: format the synced local time into a small string
+/// and place it as **static** text (no marquee — both refresh on the `BRIGHTNESS_REFRESH_SECS`
+/// static-screen wake). Draws nothing before SNTP has synced, since there is no local time yet.
+fn draw_local_time_text(
+    fb: &mut FBType,
+    el: &Element,
+    format: impl FnOnce(&mut String<16>, (i64, u32, u32, u32, u32)),
+) -> bool {
     let Some(unix) = crate::shared::now_unix() else {
         return false;
     };
-    let (_, _, _, hh, mm) = local_parts(unix);
     let mut s: String<16> = String::new();
-    match el.f {
-        1 => {
-            let _ = write!(s, "{}:{:02}", hh, mm);
-        }
-        _ => {
-            let _ = write!(s, "{:02}:{:02}", hh, mm);
-        }
-    }
+    format(&mut s, local_parts(unix));
     place_text(fb, s.as_str(), el, false, 0)
 }
 
-/// Date element (`t=4`): the local date, `DD.MM.` (`f=0`) or `DD.MM.YYYY` (`f=1`). Static.
+/// Clock element (`t=3`): the local time, `HH:MM` (`f=0`, zero-padded) or `H:MM` (`f=1`).
+fn draw_clock(fb: &mut FBType, el: &Element) -> bool {
+    draw_local_time_text(fb, el, |s, (_, _, _, hh, mm)| {
+        let _ = match el.f {
+            1 => write!(s, "{}:{:02}", hh, mm),
+            _ => write!(s, "{:02}:{:02}", hh, mm),
+        };
+    })
+}
+
+/// Date element (`t=4`): the local date, `DD.MM.` (`f=0`) or `DD.MM.YYYY` (`f=1`).
 fn draw_date(fb: &mut FBType, el: &Element) -> bool {
-    let Some(unix) = crate::shared::now_unix() else {
-        return false;
-    };
-    let (y, m, d, _, _) = local_parts(unix);
-    let mut s: String<16> = String::new();
-    match el.f {
-        1 => {
-            let _ = write!(s, "{:02}.{:02}.{}", d, m, y);
-        }
-        _ => {
-            let _ = write!(s, "{:02}.{:02}.", d, m);
-        }
-    }
-    place_text(fb, s.as_str(), el, false, 0)
+    draw_local_time_text(fb, el, |s, (y, m, d, _, _)| {
+        let _ = match el.f {
+            1 => write!(s, "{:02}.{:02}.{}", d, m, y),
+            _ => write!(s, "{:02}.{:02}.", d, m),
+        };
+    })
 }
 
 /// Divider element (`t=5`): a horizontal bar at `y`, length `w` (or to the panel edge when `w=0`),

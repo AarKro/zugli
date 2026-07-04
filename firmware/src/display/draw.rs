@@ -5,6 +5,7 @@
 //! [`super::custom`] layout renderer.
 
 use core::fmt::Write as _;
+use core::ops::Range;
 
 use embedded_graphics::draw_target::DrawTargetExt;
 use embedded_graphics::mono_font::iso_8859_1::FONT_6X10;
@@ -26,10 +27,16 @@ pub(super) fn left(fb: &mut FBType, s: &str, x: i32, y: i32, st: MonoTextStyle<'
     let _ = Text::with_baseline(s, Point::new(x, y), st, Baseline::Top).draw(fb);
 }
 
-/// Draw `s` horizontally centred at baseline-top `y`. `char_w` is the font's per-character
-/// advance (e.g. 5 for `FONT_5X7`, 6 for `FONT_6X10`).
-pub(super) fn centered(fb: &mut FBType, s: &str, y: i32, st: MonoTextStyle<'static, Color>, char_w: i32) {
-    let x = (COLS as i32 - s.chars().count() as i32 * char_w) / 2;
+/// A style's per-character advance in px — the font's cell width (5 for `FONT_5X7`, 6 for
+/// `FONT_6X10`; the frozen metrics §8.2). Derived from the style so callers can't pass a
+/// mismatched width.
+fn advance(st: &MonoTextStyle<'static, Color>) -> i32 {
+    st.font.character_size.width as i32
+}
+
+/// Draw `s` horizontally centred at baseline-top `y`.
+pub(super) fn centered(fb: &mut FBType, s: &str, y: i32, st: MonoTextStyle<'static, Color>) {
+    let x = (COLS as i32 - s.chars().count() as i32 * advance(&st)) / 2;
     left(fb, s, x, y, st);
 }
 
@@ -89,7 +96,6 @@ pub(super) fn fmt_minutes(minutes: Option<u16>) -> String<8> {
 /// Draw `text` at baseline-top `(x0, y)`. If it fits within `avail` pixels it sits flush at
 /// `x0`; otherwise it scrolls as a seamless marquee — paused ~5 s at the start, then one full
 /// round, repeat. Returns `true` when it is scrolling (so the caller keeps ticking frames).
-#[allow(clippy::too_many_arguments)] // a layout helper: position, width, style and frame all matter
 pub(super) fn draw_marquee(
     fb: &mut FBType,
     text: &str,
@@ -97,10 +103,9 @@ pub(super) fn draw_marquee(
     y: i32,
     avail: i32,
     st: MonoTextStyle<'static, Color>,
-    char_w: i32,
     frame: u32,
 ) -> bool {
-    let text_w = text.chars().count() as i32 * char_w;
+    let text_w = text.chars().count() as i32 * advance(&st);
     if text_w <= avail {
         left(fb, text, x0, y, st);
         return false;
@@ -112,28 +117,22 @@ pub(super) fn draw_marquee(
     true
 }
 
-/// Like [`draw_marquee`], but the text is clipped to the band `[x0, x0+avail) × [clip_top,
-/// clip_top+clip_h)` so a scrolling label can't spill into neighbouring content (the badge to
-/// its left or the time to its right). Returns `true` when it is scrolling.
-#[allow(clippy::too_many_arguments)] // a layout helper: position, clip band, style and frame all matter
+/// Like [`draw_marquee`], but the text is clipped to the `clip` band (its left edge is where the
+/// text is laid out, its width is the marquee's available room) so a scrolling label can't spill
+/// into neighbouring content (the badge to its left or the time to its right). `y` is the text's
+/// baseline-top row. Returns `true` when it is scrolling.
 pub(super) fn draw_marquee_clipped(
     fb: &mut FBType,
     text: &str,
-    x0: i32,
+    clip: Rectangle,
     y: i32,
-    avail: i32,
-    clip_top: i32,
-    clip_h: i32,
     st: MonoTextStyle<'static, Color>,
-    char_w: i32,
     frame: u32,
 ) -> bool {
-    let clip = Rectangle::new(
-        Point::new(x0, clip_top),
-        Size::new(avail.max(0) as u32, clip_h.max(0) as u32),
-    );
+    let x0 = clip.top_left.x;
+    let avail = clip.size.width as i32;
     let mut target = fb.clipped(&clip);
-    let text_w = text.chars().count() as i32 * char_w;
+    let text_w = text.chars().count() as i32 * advance(&st);
     if text_w <= avail {
         let _ = Text::with_baseline(text, Point::new(x0, y), st, Baseline::Top).draw(&mut target);
         return false;
@@ -150,27 +149,25 @@ pub(super) fn draw_marquee_clipped(
 /// between adjacent segments. If the assembled row fits within `avail` it sits flush at `x0`;
 /// otherwise the whole row scrolls together as a single marquee (same cadence as [`draw_marquee`]).
 /// Returns `true` while it is scrolling.
-#[allow(clippy::too_many_arguments)] // a layout helper: position, spacing, width and frame all matter
 pub(super) fn draw_segments_row(
     fb: &mut FBType,
     segs: &[(&str, MonoTextStyle<'static, Color>)],
     x0: i32,
     y: i32,
     avail: i32,
-    char_w: i32,
     space: i32,
     frame: u32,
 ) -> bool {
-    let seg_w = |s: &str| s.chars().count() as i32 * char_w;
-    let total: i32 =
-        segs.iter().map(|(s, _)| seg_w(s)).sum::<i32>() + space * (segs.len() as i32 - 1).max(0);
+    let seg_w = |s: &str, st: &MonoTextStyle<'static, Color>| s.chars().count() as i32 * advance(st);
+    let total: i32 = segs.iter().map(|(s, st)| seg_w(s, st)).sum::<i32>()
+        + space * (segs.len() as i32 - 1).max(0);
 
     // Lay every segment out from `start`, advancing by its width plus one space.
     let draw_at = |fb: &mut FBType, start: i32| {
         let mut x = start;
         for &(s, st) in segs {
             left(fb, s, x, y, st);
-            x += seg_w(s) + space;
+            x += seg_w(s, &st) + space;
         }
     };
 
@@ -240,6 +237,20 @@ const TRAIN_GLYPH: [[u8; 9]; 10] = [
     [0, 1, 1, 0, 0, 0, 1, 1, 0], // wheels
 ];
 
+/// Draw one source pixel as a `k×k` block with its top-left at `(x, y)`, keeping columns inside
+/// `clip` (rows are already bounded to the panel by [`pset`]). The shared innermost step of every
+/// pixel-doubling blit ([`blit_bitmap`], the custom renderer's `blit_scaled_text`).
+pub(super) fn blit_cell(fb: &mut FBType, x: i32, y: i32, k: i32, color: Color, clip: &Range<i32>) {
+    for sy in 0..k {
+        for sx in 0..k {
+            let px = x + sx;
+            if clip.contains(&px) {
+                pset(fb, px, y + sy, color);
+            }
+        }
+    }
+}
+
 /// Blit a small bitmap glyph with its top-left at `(x, y)`, each lit cell drawn as a `k×k` block.
 pub(super) fn blit_bitmap<const W: usize, const H: usize>(
     fb: &mut FBType,
@@ -249,14 +260,11 @@ pub(super) fn blit_bitmap<const W: usize, const H: usize>(
     k: i32,
     color: Color,
 ) {
+    let no_clip = i32::MIN..i32::MAX; // pset already clips to the panel
     for (gy, row) in glyph.iter().enumerate() {
         for (gx, &on) in row.iter().enumerate() {
             if on == 1 {
-                for sy in 0..k {
-                    for sx in 0..k {
-                        pset(fb, x + gx as i32 * k + sx, y + gy as i32 * k + sy, color);
-                    }
-                }
+                blit_cell(fb, x + gx as i32 * k, y + gy as i32 * k, k, color, &no_clip);
             }
         }
     }

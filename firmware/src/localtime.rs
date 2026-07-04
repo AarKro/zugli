@@ -53,26 +53,31 @@ fn last_sunday_0100_utc(year: i64, month: u32) -> i64 {
 
 /// Civil date `(year, month, day)` for a count of days since the Unix epoch (Howard Hinnant's
 /// algorithm). Only the year is needed here, but the full date keeps the routine self-contained.
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097; // [0, 146096]
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
-    let mp = (5 * doy + 2) / 153; // [0, 11]
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
-    (y + if m <= 2 { 1 } else { 0 }, m, d)
+/// The maths works on a March-based year (so the leap day is the *last* day of the shifted year),
+/// split into 400-year "eras" of exactly 146 097 days.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let shifted = days + 719_468; // rebase day 0 from 1970-01-01 to 0000-03-01
+    let era = shifted.div_euclid(146_097);
+    let day_of_era = shifted - era * 146_097; // [0, 146096]
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365; // [0, 399]
+    let year = year_of_era + era * 400; // March-based year
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100); // [0, 365]
+    let month_from_march = (5 * day_of_year + 2) / 153; // [0, 11]: 0 = March
+    let day = (day_of_year - (153 * month_from_march + 2) / 5 + 1) as u32; // [1, 31]
+    let month =
+        if month_from_march < 10 { month_from_march + 3 } else { month_from_march - 9 } as u32; // [1, 12]
+    (year + if month <= 2 { 1 } else { 0 }, month, day)
 }
 
 /// Days since the Unix epoch for civil date `(year, month, day)` (inverse of [`civil_from_days`]).
-fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400; // [0, 399]
-    let m = m as i64;
-    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d as i64 - 1; // [0, 365]
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
-    era * 146_097 + doe - 719_468
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year }; // March-based year (see civil_from_days)
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400; // [0, 399]
+    let month = month as i64;
+    let day_of_year =
+        (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day as i64 - 1; // [0, 365]
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year; // [0, 146096]
+    era * 146_097 + day_of_era - 719_468
 }
