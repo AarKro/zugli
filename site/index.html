@@ -156,6 +156,8 @@
   .feature h3{font-size:clamp(24px,3.4vw,34px);margin-bottom:16px;}
   .feature p{color:#bdb5a9;font-size:17px;max-width:42ch;}
   .feature .tag{font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:14px;}
+  /* a feature that closes a section below another block (the steps, the parts grid) */
+  .section-follow{margin-top:clamp(72px,10vw,120px);}
   /* a feature with no media: one centred column */
   .feature.solo{grid-template-columns:1fr;text-align:center;}
   .feature.solo .feat-text{max-width:54ch;margin:0 auto;}
@@ -166,11 +168,25 @@
   .feat-img{display:block;margin:0 auto;max-width:100%;max-height:540px;width:auto;height:auto;
     filter:drop-shadow(0 30px 60px rgba(0,0,0,.55));}
 
+  /* ---------- built-in views: two live panels, board + focus ---------- */
+  .views-head{max-width:640px;}
+  .views-grid{
+    display:grid;grid-template-columns:1fr 1fr;gap:clamp(28px,4.5vw,56px);
+    margin-top:clamp(36px,5.5vw,56px);justify-items:center;
+  }
+  @media(max-width:820px){.views-grid{grid-template-columns:1fr;gap:48px;}}
+  .view-card{margin:0;display:flex;flex-direction:column;align-items:center;width:100%;}
+  .view-card .led-panel{width:min(380px,100%);}
+  .view-card figcaption{margin-top:34px;text-align:center;max-width:40ch;}
+  .view-card figcaption h3{font-size:21px;margin-bottom:8px;}
+  .view-card figcaption p{color:#aaa298;font-size:15px;margin:0;}
+  .view-card figcaption .mono{font-family:"Space Mono",monospace;color:var(--accent);font-weight:700;}
+
   /* ---------- UI builder: full-bleed horizontal showcase ---------- */
   .builder{overflow:hidden;}
   .builder-head{max-width:640px;}
-  .builder-head .btag{font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:0 0 14px;}
-  .builder-lead{color:#bdb5a9;font-size:17px;margin-top:16px;max-width:52ch;}
+  .btag{font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:0 0 14px;}
+  .builder-lead,.views-lead{color:#bdb5a9;font-size:17px;margin-top:16px;max-width:52ch;}
   .hscroll-outer{margin-top:clamp(32px,5vw,52px);}
   .hscroll{
     display:flex;gap:clamp(22px,3vw,44px);
@@ -188,7 +204,7 @@
     margin:0;display:flex;flex-direction:column;
   }
   .bcard img{width:100%;height:auto;filter:drop-shadow(0 32px 55px rgba(0,0,0,.6));}
-  .bcard figcaption{margin-top:22px;}
+  .bcard figcaption{margin-top:34px;}
   .bcard figcaption h3{font-size:21px;margin-bottom:8px;}
   .bcard figcaption p{color:#aaa298;font-size:15px;max-width:34ch;}
   .bcard .mono{font-family:"Space Mono",monospace;color:var(--accent);font-weight:700;}
@@ -309,6 +325,7 @@
   <div class="wrap">
     <a class="brand" href="#top">Zügli</a>
     <div class="nav-links">
+      <a class="hide-sm" href="#views">See it live</a>
       <a class="hide-sm" href="#builder">Make it yours</a>
       <a class="hide-sm" href="#parts">What's inside</a>
       <a class="hide-sm" href="#price">The price</a>
@@ -369,40 +386,42 @@
 
 <div class="divider"></div>
 
-<!-- ============ FEATURES ============ -->
-<section>
+<!-- ============ BUILT-IN VIEWS: TWO LIVE PANELS ============ -->
+<section id="views">
   <div class="wrap">
-
-    <div class="feature flip reveal">
-      <div class="feat-text">
-        <p class="tag">No app, no account</p>
-        <h3>Set it up from your phone in two minutes.</h3>
-        <p>On first power-up Zügli opens its own <strong>Zügli-Setup</strong> hotspot. Join it,
-        pick your home WiFi, then open <strong>zugli.local</strong> and search for your stop.
-        Choose whether to follow one connection, a few, or the whole stop, hit Save, and the
-        panel switches over live, no reboot, nothing to install. Set the brightness or let it
-        auto-dim at night from the same page.</p>
-      </div>
-      <div class="feat-media">
-        <img class="feat-img" src="img/config.png" width="980" height="1880"
-             alt="The Zügli config page open in a phone browser at zugli.local, searching for a stop and picking the connections to track." loading="lazy">
-      </div>
+    <div class="views-head">
+      <p class="btag reveal">On the panel</p>
+      <h2 class="section-title reveal">Out of the box,<br/>it looks like this.</h2>
+      <p class="views-lead reveal">Two built-in views ship with the firmware, here rendering the same
+        three departures. These aren't mockups: both panels below run the exact layout the firmware
+        draws, glyph for glyph, on the real 64×64 matrix.</p>
     </div>
 
-    <div class="feature reveal">
-      <div class="feat-text">
-        <p class="tag">Honest hardware</p>
-        <h3>Open source, top to bottom.</h3>
-        <p>An ESP32-S3 driving a single 64×64 HUB75 panel, firmware written in
-        <strong>Rust</strong> (<code>no_std</code>, Embassy). Every wire, pin and line of code
-        is published. Build it exactly as documented, or change whatever you like. It's yours.</p>
-      </div>
-      <div class="feat-media">
-        <img class="feat-img" src="img/wiring.png" width="1536" height="2048"
-             alt="The back of the HUB75 LED panel with the ESP32-S3 microcontroller wired to it by a ribbon of jumper wires." loading="lazy">
-      </div>
-    </div>
+    <div class="views-grid">
+      <figure class="view-card reveal">
+        <div class="led-panel" role="img"
+             aria-label="A 64 by 64 LED matrix showing the departure board: the stop name Bellevue on top, then three rows, each with a line badge, a destination and the minutes until it leaves.">
+          <canvas class="led-canvas" id="view-board" width="576" height="576" aria-hidden="true"></canvas>
+        </div>
+        <figcaption>
+          <h3>The departure board.</h3>
+          <p>Your stop up top, the next three departures under it: line, destination, and a live
+            countdown. When one hits <span class="mono">0</span>, a little tram rolls up in place of the minutes.</p>
+        </figcaption>
+      </figure>
 
+      <figure class="view-card reveal">
+        <div class="led-panel" role="img"
+             aria-label="The same 64 by 64 LED matrix in focus view: one departure with its line badge and destination on top, a very large minute countdown in the middle, and the following departure in small text at the bottom.">
+          <canvas class="led-canvas" id="view-focus" width="576" height="576" aria-hidden="true"></canvas>
+        </div>
+        <figcaption>
+          <h3>Focus view.</h3>
+          <p>One connection, one big number. The whole panel counts down the departure you actually
+            ride, with the one after it tucked into the footer.</p>
+        </figcaption>
+      </figure>
+    </div>
   </div>
 </section>
 
@@ -480,6 +499,22 @@
         <p>Set it on a shelf by the door. From now on it counts down your next departures, and you leave at the right minute, every time.</p>
       </div>
     </div>
+
+    <div class="feature flip reveal section-follow">
+      <div class="feat-text">
+        <p class="tag">No app, no account</p>
+        <h3>Set it up from your phone in two minutes.</h3>
+        <p>On first power-up Zügli opens its own <strong>Zügli-Setup</strong> hotspot. Join it,
+        pick your home WiFi, then open <strong>zugli.local</strong> and search for your stop.
+        Choose whether to follow one connection, a few, or the whole stop, hit Save, and the
+        panel switches over live, no reboot, nothing to install. Set the brightness or let it
+        auto-dim at night from the same page.</p>
+      </div>
+      <div class="feat-media">
+        <img class="feat-img" src="img/config.png" width="980" height="1880"
+             alt="The Zügli config page open in a phone browser at zugli.local, searching for a stop and picking the connections to track." loading="lazy">
+      </div>
+    </div>
   </div>
 </section>
 
@@ -539,6 +574,20 @@
         <div style="font-family:'Space Mono',monospace;font-weight:700;font-size:22px;color:var(--accent);">That's the whole list.</div>
         <p class="part-role" style="margin-top:0;">Five parts, no custom hardware, nothing exotic.</p>
         <a class="btn btn-ghost" href="#price" style="padding:10px 18px;font-size:14px;">What does it cost? ↓</a>
+      </div>
+    </div>
+
+    <div class="feature reveal section-follow">
+      <div class="feat-text">
+        <p class="tag">Honest hardware</p>
+        <h3>Open source, top to bottom.</h3>
+        <p>An ESP32-S3 driving a single 64×64 HUB75 panel, firmware written in
+        <strong>Rust</strong> (<code>no_std</code>, Embassy). Every wire, pin and line of code
+        is published. Build it exactly as documented, or change whatever you like. It's yours.</p>
+      </div>
+      <div class="feat-media">
+        <img class="feat-img" src="img/wiring.png" width="1536" height="2048"
+             alt="The back of the HUB75 LED panel with the ESP32-S3 microcontroller wired to it by a ribbon of jumper wires." loading="lazy">
       </div>
     </div>
   </div>
@@ -786,6 +835,233 @@
     if('IntersectionObserver' in window){
       new IntersectionObserver(function(e){ startStop(e[0].isIntersecting); },
         {threshold:0.05}).observe(cv);
+    } else { startStop(true); }
+  })();
+
+  // "Out of the box" showcase: the two panels are live, glyph-exact JS ports of the firmware's
+  // built-in screens — the three-row departure board (screens.rs draw_departures) and the
+  // single-departure focus view (draw_focus) — fed the same simulated departures. Same fonts
+  // (embedded-graphics FONT_5X7 / FONT_6X10, auto-generated like the config-page simulator),
+  // same palette, same marquee cadence; painted with the hero panel's glowing-dot look.
+  (function(){
+    var boardCv = document.getElementById('view-board');
+    var focusCv = document.getElementById('view-focus');
+    if(!boardCv || !focusCv || !boardCv.getContext) return;
+
+    var W=64, H=64;
+    // display.rs palette at full strength: amber text, copper accent, muted copper, unlit.
+    var AMBER=0xffa800, ACCENT=0xaa4a10, DIMC=0x744a1e, OFF=0;
+    var HOLD=100, GAP=14;              // marquee cadence: ~5 s hold, then 1 px/frame; 14 px wrap gap
+
+    // embedded-graphics FONT_5X7 / FONT_6X10 (iso_8859_1), auto-generated — same rasterisation
+    // as the firmware and the config-page simulator. Bit gx of row gy lit iff (row>>gx)&1.
+    var FONTS={
+      "5x7":{w:5,h:7,adv:5,def:[4,10,8,4,0,4,0],g:{32:[0,0,0,0,0,0,0],33:[4,4,4,4,0,4,0],34:[10,10,10,0,0,0,0],35:[0,10,31,10,31,10,0],36:[0,14,5,14,20,14,0],37:[1,9,4,2,9,8,0],38:[0,2,5,2,5,10,0],39:[4,4,4,0,0,0,0],40:[4,2,2,2,2,4,0],41:[2,4,4,4,4,2,0],42:[0,10,4,14,4,10,0],43:[0,4,4,31,4,4,0],44:[0,0,0,0,12,4,2],45:[0,0,0,15,0,0,0],46:[0,0,0,0,6,6,0],47:[0,8,4,2,1,0,0],48:[4,10,10,10,10,4,0],49:[4,6,4,4,4,14,0],50:[6,9,8,4,2,15,0],51:[15,8,6,8,9,6,0],52:[4,6,5,15,4,4,0],53:[15,1,7,8,9,6,0],54:[6,1,7,9,9,6,0],55:[15,8,4,4,2,2,0],56:[6,9,6,9,9,6,0],57:[6,9,9,14,8,6,0],58:[0,6,6,0,6,6,0],59:[0,6,6,0,6,2,1],60:[0,8,4,2,4,8,0],61:[0,0,15,0,15,0,0],62:[0,2,4,8,4,2,0],63:[4,10,8,4,0,4,0],64:[6,9,13,13,1,6,0],65:[6,9,9,15,9,9,0],66:[7,9,7,9,9,7,0],67:[6,9,1,1,9,6,0],68:[7,9,9,9,9,7,0],69:[15,1,7,1,1,15,0],70:[15,1,7,1,1,1,0],71:[6,9,1,13,9,14,0],72:[9,9,15,9,9,9,0],73:[14,4,4,4,4,14,0],74:[8,8,8,8,9,6,0],75:[9,5,3,3,5,9,0],76:[1,1,1,1,1,15,0],77:[9,15,15,9,9,9,0],78:[9,11,11,13,13,9,0],79:[6,9,9,9,9,6,0],80:[7,9,9,7,1,1,0],81:[6,9,9,9,11,6,8],82:[7,9,9,7,5,9,0],83:[6,9,2,4,9,6,0],84:[14,4,4,4,4,4,0],85:[9,9,9,9,9,6,0],86:[9,9,9,9,6,6,0],87:[9,9,9,15,15,9,0],88:[9,9,6,6,9,9,0],89:[10,10,10,4,4,4,0],90:[15,8,4,2,1,15,0],91:[14,2,2,2,2,14,0],92:[0,1,2,4,8,0,0],93:[14,8,8,8,8,14,0],94:[4,10,0,0,0,0,0],95:[0,0,0,0,0,15,0],96:[2,4,0,0,0,0,0],97:[0,0,14,9,13,10,0],98:[1,1,7,9,9,7,0],99:[0,0,6,1,1,6,0],100:[8,8,14,9,9,14,0],101:[0,0,6,13,3,6,0],102:[4,10,2,7,2,2,0],103:[0,0,14,9,6,1,14],104:[1,1,7,9,9,9,0],105:[4,0,6,4,4,14,0],106:[8,0,8,8,8,10,4],107:[1,1,5,3,5,9,0],108:[6,4,4,4,4,14,0],109:[0,0,5,15,9,9,0],110:[0,0,7,9,9,9,0],111:[0,0,6,9,9,6,0],112:[0,0,7,9,9,7,1],113:[0,0,14,9,9,14,8],114:[0,0,7,9,1,1,0],115:[0,0,14,3,12,7,0],116:[2,2,7,2,2,12,0],117:[0,0,9,9,9,14,0],118:[0,0,10,10,10,4,0],119:[0,0,9,9,15,15,0],120:[0,0,9,6,6,9,0],121:[0,0,9,9,10,4,2],122:[0,0,15,4,2,15,0],123:[8,4,6,4,4,8,0],124:[4,4,4,4,4,4,0],125:[2,4,12,4,4,2,0],126:[10,5,0,0,0,0,0],176:[4,10,4,0,0,0,0],196:[9,6,9,15,9,9,0],214:[9,6,9,9,9,6,0],220:[9,0,9,9,9,6,0],223:[6,9,5,9,9,5,0],228:[10,0,14,9,13,10,0],232:[2,4,6,13,3,6,0],233:[4,2,6,13,3,6,0],246:[10,0,6,9,9,6,0],252:[10,0,9,9,9,14,0]}},
+      "6x10":{w:6,h:10,adv:6,def:[0,14,17,8,4,4,0,4,0,0],g:{32:[0,0,0,0,0,0,0,0,0,0],33:[0,4,4,4,4,4,0,4,0,0],34:[0,10,10,10,0,0,0,0,0,0],35:[0,10,10,31,10,31,10,10,0,0],36:[0,4,14,5,14,20,14,4,0,0],37:[0,18,21,10,4,10,21,9,0,0],38:[0,2,5,5,2,21,9,22,0,0],39:[0,4,4,4,0,0,0,0,0,0],40:[0,8,4,2,2,2,4,8,0,0],41:[0,2,4,8,8,8,4,2,0,0],42:[0,0,17,10,31,10,17,0,0,0],43:[0,0,4,4,31,4,4,0,0,0],44:[0,0,0,0,0,0,12,4,2,0],45:[0,0,0,0,31,0,0,0,0,0],46:[0,0,0,0,0,0,4,14,4,0],47:[0,16,16,8,4,2,1,1,0,0],48:[0,4,10,17,17,17,10,4,0,0],49:[0,4,6,5,4,4,4,31,0,0],50:[0,14,17,16,12,2,1,31,0,0],51:[0,31,16,8,12,16,17,14,0,0],52:[0,8,12,10,9,31,8,8,0,0],53:[0,31,1,13,19,16,17,14,0,0],54:[0,12,2,1,13,19,17,14,0,0],55:[0,31,16,8,8,4,2,2,0,0],56:[0,14,17,17,14,17,17,14,0,0],57:[0,14,17,25,22,16,8,6,0,0],58:[0,0,4,14,4,0,4,14,4,0],59:[0,0,4,14,4,0,12,4,2,0],60:[0,16,8,4,2,4,8,16,0,0],61:[0,0,0,31,0,31,0,0,0,0],62:[0,2,4,8,16,8,4,2,0,0],63:[0,14,17,8,4,4,0,4,0,0],64:[0,14,17,25,21,13,1,14,0,0],65:[0,4,10,17,17,31,17,17,0,0],66:[0,15,18,18,14,18,18,15,0,0],67:[0,14,17,1,1,1,17,14,0,0],68:[0,15,18,18,18,18,18,15,0,0],69:[0,31,1,1,15,1,1,31,0,0],70:[0,31,1,1,15,1,1,1,0,0],71:[0,14,17,1,1,25,17,14,0,0],72:[0,17,17,17,31,17,17,17,0,0],73:[0,14,4,4,4,4,4,14,0,0],74:[0,28,8,8,8,8,9,6,0,0],75:[0,17,9,5,3,5,9,17,0,0],76:[0,1,1,1,1,1,1,31,0,0],77:[0,17,17,27,21,17,17,17,0,0],78:[0,17,17,19,21,25,17,17,0,0],79:[0,14,17,17,17,17,17,14,0,0],80:[0,15,17,17,15,1,1,1,0,0],81:[0,14,17,17,17,17,21,14,16,0],82:[0,15,17,17,15,5,9,17,0,0],83:[0,14,17,1,14,16,17,14,0,0],84:[0,31,4,4,4,4,4,4,0,0],85:[0,17,17,17,17,17,17,14,0,0],86:[0,17,17,17,10,10,10,4,0,0],87:[0,17,17,17,21,21,27,17,0,0],88:[0,17,17,10,4,10,17,17,0,0],89:[0,17,17,10,4,4,4,4,0,0],90:[0,31,16,8,4,2,1,31,0,0],91:[0,14,2,2,2,2,2,14,0,0],92:[0,1,1,2,4,8,16,16,0,0],93:[0,14,8,8,8,8,8,14,0,0],94:[0,4,10,17,0,0,0,0,0,0],95:[0,0,0,0,0,0,0,0,31,0],96:[4,8,0,0,0,0,0,0,0,0],97:[0,0,0,14,16,30,17,30,0,0],98:[0,1,1,13,19,17,19,13,0,0],99:[0,0,0,14,17,1,17,14,0,0],100:[0,16,16,22,25,17,25,22,0,0],101:[0,0,0,14,17,31,1,14,0,0],102:[0,12,18,2,15,2,2,2,0,0],103:[0,0,0,30,17,17,30,16,17,14],104:[0,1,1,13,19,17,17,17,0,0],105:[0,4,0,6,4,4,4,14,0,0],106:[0,16,0,24,16,16,16,18,18,12],107:[0,1,1,17,9,7,9,17,0,0],108:[0,6,4,4,4,4,4,14,0,0],109:[0,0,0,11,21,21,21,17,0,0],110:[0,0,0,13,19,17,17,17,0,0],111:[0,0,0,14,17,17,17,14,0,0],112:[0,0,0,13,19,17,19,13,1,1],113:[0,0,0,22,25,17,25,22,16,16],114:[0,0,0,13,19,1,1,1,0,0],115:[0,0,0,14,1,14,16,15,0,0],116:[0,2,2,15,2,2,18,12,0,0],117:[0,0,0,17,17,17,25,22,0,0],118:[0,0,0,17,17,10,10,4,0,0],119:[0,0,0,17,17,21,21,10,0,0],120:[0,0,0,17,10,4,10,17,0,0],121:[0,0,0,17,17,25,22,16,17,14],122:[0,0,0,31,8,4,2,31,0,0],123:[0,24,4,8,6,8,4,24,0,0],124:[0,4,4,4,4,4,4,4,0,0],125:[0,6,8,4,24,4,8,6,0,0],126:[0,18,21,9,0,0,0,0,0,0],176:[0,4,10,4,0,0,0,0,0,0],196:[10,0,14,17,17,31,17,17,0,0],214:[10,0,14,17,17,17,17,14,0,0],220:[10,0,17,17,17,17,17,14,0,0],223:[0,14,17,9,5,9,17,13,0,0],228:[0,10,0,14,16,30,17,30,0,0],232:[2,4,0,14,17,31,1,14,0,0],233:[8,4,0,14,17,31,1,14,0,0],246:[0,10,0,14,17,17,17,14,0,0],252:[0,10,0,17,17,17,25,22,0,0]}}
+    };
+    var F5=FONTS['5x7'], F6=FONTS['6x10'];
+
+    // ---- framebuffer: one 0xRRGGBB int per LED, 0 = unlit ----
+    function pset(g,x,y,c){ x|=0; y|=0; if(x>=0 && y>=0 && x<W && y<H) g[y*W+x]=c; }
+    function fillRect(g,x,y,w,h,c){ for(var yy=0;yy<h;yy++) for(var xx=0;xx<w;xx++) pset(g,x+xx,y+yy,c); }
+    function cpLen(s){ var n=0; for(var ch of s) n++; return n; }
+    function textW(s,font){ return cpLen(s)*font.adv; }
+
+    // Draw `s` at baseline-top (x,y), columns clipped to [c0,c1). Bit gx of glyph row gy is lit.
+    function text(g,s,x,y,font,c,c0,c1){
+      if(c0===undefined){ c0=-1e9; c1=1e9; }
+      for(var ch of s){
+        if(x+font.adv>c0 && x<c1){
+          var glyph=font.g[ch.codePointAt(0)] || font.def;
+          for(var gy=0;gy<font.h;gy++){
+            var row=glyph[gy];
+            for(var gx=0;gx<font.adv;gx++){
+              if((row>>gx)&1){ var px=x+gx; if(px>=c0 && px<c1) pset(g,px,y+gy,c); }
+            }
+          }
+        }
+        x+=font.adv;
+      }
+    }
+
+    // Fits → flush left; too wide → hold, then scroll 1 px/frame, clipped to [x0,x0+avail).
+    function marquee(g,s,x0,y,avail,font,c,frame){
+      var tw=textW(s,font);
+      if(tw<=avail){ text(g,s,x0,y,font,c,x0,x0+avail); return; }
+      var period=tw+GAP, off=Math.max(0,(frame%(HOLD+period))-HOLD);
+      text(g,s,x0-off,y,font,c,x0,x0+avail);
+      text(g,s,x0-off+period,y,font,c,x0,x0+avail);
+    }
+
+    // Line badge: amber fill, 11 px tall, digits left unlit as cut-outs (draw_badge).
+    function badge(g,line,x,y){
+      var w=cpLen(line)*6+5;
+      fillRect(g,x,y,w,11,AMBER);
+      text(g,line,x+3,y+1,F6,OFF);
+      return x+w;
+    }
+
+    // "Departing now" front-of-tram pictogram (draw.rs TRAIN_GLYPH), 9×10, scaled by k.
+    var TRAIN=[
+      [0,0,1,1,1,1,1,0,0],
+      [0,1,1,1,1,1,1,1,0],
+      [1,1,1,1,1,1,1,1,1],
+      [1,0,0,0,0,0,0,0,1],
+      [1,1,1,1,1,1,1,1,1],
+      [1,0,0,0,1,0,0,0,1],
+      [1,0,0,0,1,0,0,0,1],
+      [1,1,1,1,1,1,1,1,1],
+      [1,1,1,1,1,1,1,1,1],
+      [0,1,1,0,0,0,1,1,0]
+    ];
+    var TRAIN_W=9, TRAIN_H=10;
+    function train(g,x,y,k,c){
+      for(var gy=0;gy<TRAIN_H;gy++) for(var gx=0;gx<TRAIN_W;gx++)
+        if(TRAIN[gy][gx]) fillRect(g,x+gx*k,y+gy*k,k,k,c);
+    }
+
+    function fmtMin(m){ return m==null ? '--' : m+"'"; }
+    // "Hide city names" setting (on for this demo): drop a leading "City, " prefix.
+    function city(n){ var i=n.indexOf(', '); return (i>=0 && i+2<n.length) ? n.slice(i+2) : n; }
+
+    // ---- the departure board (screens.rs draw_departures) ----
+    function drawBoard(g,station,deps,frame){
+      marquee(g,city(station),1,0,W-2,F6,AMBER,frame);   // stop heading
+      fillRect(g,0,11,W,1,ACCENT);                       // rule
+      for(var i=0;i<Math.min(deps.length,3);i++){
+        var dep=deps[i], ry=12+i*17, badgeY=ry+3, textY=ry+6;
+        var now = dep.m===0, mins=fmtMin(dep.m);
+        // Right: minutes right-aligned, or the tram pictogram centred over the digit column.
+        var timeX = now ? (W-1-2*5) + ((5-TRAIN_W)>>1)   // == 51, matches the Rust integer maths
+                        : W-1-cpLen(mins)*5;
+        if(now) train(g,timeX,ry+4,1,ACCENT);
+        else text(g,mins,timeX,textY,F5,ACCENT);
+        // Left: the line badge. Middle: destination, clipped short of the time.
+        var badgeEnd=badge(g,dep.line,1,badgeY);
+        var destX=badgeEnd+2, avail=timeX-2-destX;
+        if(avail>0) marquee(g,city(dep.dest),destX,textY,avail,F5,AMBER,frame);
+      }
+    }
+
+    // ---- the focus view (screens.rs draw_focus) ----
+    var BIG_DW=15, BIG_DH=34, BIG_GAP=4;
+    var SEG_MASK=[0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f]; // a..g = bits 0..6
+    function segDigit(g,x,y,d,c){
+      var T=3, m=SEG_MASK[d%10], w=BIG_DW, h=BIG_DH, mid=y+((h-T)>>1);
+      if(m&0x01) fillRect(g,x,y,w,T,c);            // a — top
+      if(m&0x40) fillRect(g,x,mid,w,T,c);          // g — middle
+      if(m&0x08) fillRect(g,x,y+h-T,w,T,c);        // d — bottom
+      if(m&0x20) fillRect(g,x,y,T,h/2,c);          // f — top-left
+      if(m&0x02) fillRect(g,x+w-T,y,T,h/2,c);      // b — top-right
+      if(m&0x10) fillRect(g,x,y+h/2,T,h/2,c);      // e — bottom-left
+      if(m&0x04) fillRect(g,x+w-T,y+h/2,T,h/2,c);  // c — bottom-right
+    }
+    function bigMinutes(g,m,cy){
+      if(m===0){ train(g,(W-TRAIN_W*2)>>1,cy-TRAIN_H,2,ACCENT); return; }
+      if(m==null){
+        var total=2*BIG_DW+BIG_GAP, dx=(W-total)>>1;
+        fillRect(g,dx,cy-2,BIG_DW,4,DIMC); fillRect(g,dx+BIG_DW+BIG_GAP,cy-2,BIG_DW,4,DIMC);
+        return;
+      }
+      var s=''+m, n=s.length;
+      var x=(W-(n*BIG_DW+(n-1)*BIG_GAP))>>1, y=cy-(BIG_DH>>1);
+      for(var i=0;i<n;i++){ segDigit(g,x,y,s.charCodeAt(i)-48,AMBER); x+=BIG_DW+BIG_GAP; }
+      fillRect(g,x-BIG_GAP+3,y,2,6,AMBER);         // trailing apostrophe, echoing the board's N'
+    }
+    // Footer row of coloured segments; scrolls as one if it can't fit (draw_segments_row).
+    function segRow(g,segs,x0,y,avail,space,frame){
+      var total=space*(segs.length-1);
+      for(var i=0;i<segs.length;i++) total+=textW(segs[i][0],F5);
+      function drawAt(start){
+        var x=start;
+        for(var i=0;i<segs.length;i++){ text(g,segs[i][0],x,y,F5,segs[i][1]); x+=textW(segs[i][0],F5)+space; }
+      }
+      if(total<=avail){ drawAt(x0); return; }
+      var period=total+GAP, off=Math.max(0,(frame%(HOLD+period))-HOLD);
+      drawAt(x0-off); drawAt(x0-off+period);
+    }
+    function drawFocus(g,deps,frame){
+      var next=deps[0];
+      if(!next) return;
+      // Identity row: line badge + destination, no stop heading.
+      var badgeEnd=badge(g,next.line,1,1);
+      var destX=badgeEnd+2, avail=W-1-destX;
+      if(avail>0) marquee(g,city(next.dest),destX,4,avail,F5,AMBER,frame);
+      bigMinutes(g,next.m,33);
+      var after=deps[1];
+      if(after) segRow(g,[['next',DIMC],[after.line,AMBER],['in',DIMC],[fmtMin(after.m),ACCENT]],1,57,W-2,4,frame);
+    }
+
+    // ---- sample data: tram lines through Zürich Bellevue, minutes ticking down live.
+    // Single-digit lines on purpose, so every badge is the same width and the rows line up;
+    // the longer destinations scroll as marquees, just like on the real board. ----
+    var station='Zürich, Bellevue';
+    var deps=[
+      {line:'4', dest:'Zürich, Tiefenbrunnen', m:2},
+      {line:'8', dest:'Zürich, Klusplatz',     m:6},
+      {line:'5', dest:'Zürich, Zoo',           m:11}
+    ];
+    // One simulated "minute" every few seconds: everything counts down; a departure that hits 0
+    // shows as "now" for one beat, then leaves and rejoins the back of the queue.
+    function tick(){
+      if(deps[0].m===0){ var d=deps.shift(); d.m=deps[deps.length-1].m+5; deps.push(d); }
+      else for(var i=0;i<deps.length;i++) deps[i].m--;
+    }
+
+    // ---- painter: the hero panel's glowing-dot look (prebaked unlit grid + bloom) ----
+    function mkPanel(cv){
+      var ctx=cv.getContext('2d',{alpha:false});
+      var CELL=cv.width/W, DOT=CELL*0.30, BLOOM=CELL*0.62;
+      var bg=document.createElement('canvas'); bg.width=cv.width; bg.height=cv.height;
+      var b=bg.getContext('2d');
+      b.fillStyle='#080605'; b.fillRect(0,0,bg.width,bg.height);
+      b.fillStyle='#171009';
+      for(var y=0;y<H;y++) for(var x=0;x<W;x++){
+        b.beginPath(); b.arc(x*CELL+CELL/2,y*CELL+CELL/2,DOT,0,6.2832); b.fill();
+      }
+      return function(grid){
+        ctx.drawImage(bg,0,0);
+        ctx.globalCompositeOperation='lighter';
+        for(var y=0;y<H;y++) for(var x=0;x<W;x++){
+          var c=grid[y*W+x];
+          if(!c) continue;
+          var r=(c>>16)&255, gr=(c>>8)&255, bl=c&255;
+          var cx=x*CELL+CELL/2, cy=y*CELL+CELL/2;
+          ctx.fillStyle='rgba('+r+','+gr+','+bl+',0.20)';
+          ctx.beginPath(); ctx.arc(cx,cy,BLOOM,0,6.2832); ctx.fill();
+          ctx.fillStyle='rgb('+Math.min(255,(r*1.12)|0)+','+Math.min(255,(gr*1.12)|0)+','+Math.min(255,(bl*1.12)|0)+')';
+          ctx.beginPath(); ctx.arc(cx,cy,DOT*1.06,0,6.2832); ctx.fill();
+        }
+        ctx.globalCompositeOperation='source-over';
+      };
+    }
+
+    var paintBoard=mkPanel(boardCv), paintFocus=mkPanel(focusCv);
+    var gB=new Uint32Array(W*H), gF=new Uint32Array(W*H);
+    function render(frame){
+      gB.fill(0); drawBoard(gB,station,deps,frame); paintBoard(gB);
+      gF.fill(0); drawFocus(gF,deps,frame);         paintFocus(gF);
+    }
+    render(0);
+
+    if(window.matchMedia('(prefers-reduced-motion: reduce)').matches) return; // settled static frame
+
+    // 20 fps frame clock (50 ms/frame, the firmware's cadence); pause while off-screen.
+    var TICK_MS=7000, lastTick=null, t0=null, lastFrame=-1, raf=0, running=false;
+    function loop(ts){
+      if(t0===null){ t0=ts; lastTick=ts; }
+      if(ts-lastTick>=TICK_MS){ tick(); lastTick=ts; lastFrame=-1; }
+      var f=Math.floor((ts-t0)/50);
+      if(f!==lastFrame){ lastFrame=f; render(f); }
+      raf=requestAnimationFrame(loop);
+    }
+    function startStop(on){
+      if(on && !running){ running=true; raf=requestAnimationFrame(loop); }
+      else if(!on && running){ running=false; cancelAnimationFrame(raf); }
+    }
+    if('IntersectionObserver' in window){
+      new IntersectionObserver(function(e){ startStop(e[0].isIntersecting); },
+        {threshold:0.05}).observe(document.querySelector('.views-grid'));
     } else { startStop(true); }
   })();
 
