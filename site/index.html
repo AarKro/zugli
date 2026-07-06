@@ -155,7 +155,6 @@
     .feature.flip .feat-media{order:0;}}
   .feature h3{font-size:clamp(24px,3.4vw,34px);margin-bottom:16px;}
   .feature p{color:#bdb5a9;font-size:17px;max-width:42ch;}
-  .feature .tag{font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:14px;}
   /* a feature that closes a section below another block (the steps, the parts grid) */
   .section-follow{margin-top:clamp(72px,10vw,120px);}
   /* a feature with no media: one centred column */
@@ -177,7 +176,7 @@
   @media(max-width:820px){.views-grid{grid-template-columns:1fr;gap:48px;}}
   .view-card{margin:0;display:flex;flex-direction:column;align-items:center;width:100%;}
   .view-card .led-panel{width:min(380px,100%);}
-  .view-card figcaption{margin-top:34px;text-align:center;max-width:40ch;}
+  .view-card figcaption{margin-top:34px;width:min(380px,100%);}
   .view-card figcaption h3{font-size:21px;margin-bottom:8px;}
   .view-card figcaption p{color:#aaa298;font-size:15px;margin:0;}
   .view-card figcaption .mono{font-family:"Space Mono",monospace;color:var(--accent);font-weight:700;}
@@ -185,8 +184,10 @@
   /* ---------- UI builder: full-bleed horizontal showcase ---------- */
   .builder{overflow:hidden;}
   .builder-head{max-width:640px;}
-  .btag{font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:0 0 14px;}
-  .builder-lead,.views-lead{color:#bdb5a9;font-size:17px;margin-top:16px;max-width:52ch;}
+  .section-lead{color:#bdb5a9;font-size:17px;margin-top:16px;max-width:52ch;}
+  /* a tiny label drawn in the panel's own 5×7 dot font — the one place the page
+     wears a badge, and it's the board's voice, not a typographic eyebrow */
+  .dot-label{display:block;width:135px;height:21px;margin:0 0 20px;}
   .hscroll-outer{margin-top:clamp(32px,5vw,52px);}
   .hscroll{
     display:flex;gap:clamp(22px,3vw,44px);
@@ -390,9 +391,9 @@
 <section id="views">
   <div class="wrap">
     <div class="views-head">
-      <p class="btag reveal">On the panel</p>
+      <canvas class="dot-label reveal" id="views-label" width="360" height="56" role="img" aria-label="live demo"></canvas>
       <h2 class="section-title reveal">Out of the box,<br/>it looks like this.</h2>
-      <p class="views-lead reveal">Two built-in views ship with the firmware, here rendering the same
+      <p class="section-lead reveal">Two built-in views ship with the firmware, here rendering the same
         three departures. These aren't mockups: both panels below run the exact layout the firmware
         draws, glyph for glyph, on the real 64×64 matrix.</p>
     </div>
@@ -430,9 +431,8 @@
 <!-- ============ UI BUILDER ============ -->
 <section id="builder" class="builder">
   <div class="wrap builder-head">
-    <p class="btag reveal">Make it yours</p>
     <h2 class="section-title reveal">Design the board,<br/>dot by dot.</h2>
-    <p class="builder-lead reveal">Not sold on the default? Open the visual layout builder right in your
+    <p class="section-lead reveal">Not sold on the default? Open the visual layout builder right in your
       browser and lay out the panel exactly how you want it, drag things around, size them, colour them,
       and watch the real panel keep up as you go.</p>
   </div>
@@ -481,7 +481,7 @@
 <!-- ============ HOW IT WORKS ============ -->
 <section>
   <div class="wrap">
-    <h2 class="section-title reveal" style="text-align:center;">Three steps to the shelf.</h2>
+    <h2 class="section-title reveal">Three steps to the shelf.</h2>
     <div class="steps">
       <div class="step-card reveal">
         <div class="step-num">1</div>
@@ -502,8 +502,7 @@
 
     <div class="feature flip reveal section-follow">
       <div class="feat-text">
-        <p class="tag">No app, no account</p>
-        <h3>Set it up from your phone in two minutes.</h3>
+        <h3>Set up from your phone in two minutes. No app, no account.</h3>
         <p>On first power-up Zügli opens its own <strong>Zügli-Setup</strong> hotspot. Join it,
         pick your home WiFi, then open <strong>zugli.local</strong> and search for your stop.
         Choose whether to follow one connection, a few, or the whole stop, hit Save, and the
@@ -523,8 +522,8 @@
 <!-- ============ WHAT'S INSIDE / PARTS ============ -->
 <section id="parts">
   <div class="wrap">
-    <h2 class="section-title reveal" style="text-align:center;">What's inside.</h2>
-    <p class="reveal" style="text-align:center;color:#bdb5a9;max-width:46ch;margin:18px auto 0;font-size:17px;">
+    <h2 class="section-title reveal">What's inside.</h2>
+    <p class="section-lead reveal">
       Five off-the-shelf parts. No custom boards and no soldering, just Dupont wires and a screwdriver.
     </p>
 
@@ -579,7 +578,6 @@
 
     <div class="feature reveal section-follow">
       <div class="feat-text">
-        <p class="tag">Honest hardware</p>
         <h3>Open source, top to bottom.</h3>
         <p>An ESP32-S3 driving a single 64×64 HUB75 panel, firmware written in
         <strong>Rust</strong> (<code>no_std</code>, Embassy). Every wire, pin and line of code
@@ -1035,6 +1033,31 @@
         ctx.globalCompositeOperation='source-over';
       };
     }
+
+    // The section's little label, written in the panel's own FONT_5X7 as glowing amber dots.
+    (function(){
+      var lab=document.getElementById('views-label');
+      if(!lab || !lab.getContext) return;
+      var lc=lab.getContext('2d');
+      var s='live demo', k=lab.height/7;   // 8 device px per LED at the default 360×56
+      var col=0;
+      for(var ch of s){
+        var glyph=F5.g[ch.codePointAt(0)] || F5.def;
+        for(var gy=0;gy<F5.h;gy++){
+          var row=glyph[gy];
+          for(var gx=0;gx<F5.adv;gx++){
+            if((row>>gx)&1){
+              var cx=(col*F5.adv+gx)*k+k/2, cy=gy*k+k/2;
+              lc.fillStyle='rgba(255,168,0,0.28)';
+              lc.beginPath(); lc.arc(cx,cy,k*0.55,0,6.2832); lc.fill();
+              lc.fillStyle='#FFA800';
+              lc.beginPath(); lc.arc(cx,cy,k*0.32,0,6.2832); lc.fill();
+            }
+          }
+        }
+        col++;
+      }
+    })();
 
     var paintBoard=mkPanel(boardCv), paintFocus=mkPanel(focusCv);
     var gB=new Uint32Array(W*H), gF=new Uint32Array(W*H);
