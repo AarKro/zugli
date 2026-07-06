@@ -175,7 +175,7 @@
   @media(max-width:820px){.views-grid{grid-template-columns:1fr;gap:48px;}}
   .view-card{margin:0;display:flex;flex-direction:column;align-items:center;width:100%;}
   .view-card .led-panel{width:min(380px,100%);}
-  .view-card figcaption{margin-top:22px;text-align:center;max-width:40ch;}
+  .view-card figcaption{margin-top:34px;text-align:center;max-width:40ch;}
   .view-card figcaption h3{font-size:21px;margin-bottom:8px;}
   .view-card figcaption p{color:#aaa298;font-size:15px;margin:0;}
   .view-card figcaption .mono{font-family:"Space Mono",monospace;color:var(--accent);font-weight:700;}
@@ -202,7 +202,7 @@
     margin:0;display:flex;flex-direction:column;
   }
   .bcard img{width:100%;height:auto;filter:drop-shadow(0 32px 55px rgba(0,0,0,.6));}
-  .bcard figcaption{margin-top:22px;}
+  .bcard figcaption{margin-top:34px;}
   .bcard figcaption h3{font-size:21px;margin-bottom:8px;}
   .bcard figcaption p{color:#aaa298;font-size:15px;max-width:34ch;}
   .bcard .mono{font-family:"Space Mono",monospace;color:var(--accent);font-weight:700;}
@@ -998,12 +998,14 @@
       if(after) segRow(g,[['next',DIMC],[after.line,AMBER],['in',DIMC],[fmtMin(after.m),ACCENT]],1,57,W-2,4,frame);
     }
 
-    // ---- sample data: tram lines through Zürich Bellevue, minutes ticking down live ----
+    // ---- sample data: tram lines through Zürich Bellevue, minutes ticking down live.
+    // Single-digit lines on purpose, so every badge is the same width and the rows line up;
+    // the longer destinations scroll as marquees, just like on the real board. ----
     var station='Zürich, Bellevue';
     var deps=[
-      {line:'11', dest:'Zürich, Rehalp',        m:2},
-      {line:'4',  dest:'Zürich, Tiefenbrunnen', m:6},
-      {line:'5',  dest:'Zürich, Zoo',           m:11}
+      {line:'4', dest:'Zürich, Tiefenbrunnen', m:2},
+      {line:'8', dest:'Zürich, Klusplatz',     m:6},
+      {line:'5', dest:'Zürich, Zoo',           m:11}
     ];
     // One simulated "minute" every few seconds: everything counts down; a departure that hits 0
     // shows as "now" for one beat, then leaves and rejoins the back of the queue.
