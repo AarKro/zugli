@@ -1,0 +1,5 @@
+# Exclude web assets from GitHub language stats so the repo shows as Rust.
+# linguist-detectable=false only affects the language bar — no impact on
+# builds, diffs, or git behavior.
+site/** linguist-detectable=false
+designs/** linguist-detectable=false
