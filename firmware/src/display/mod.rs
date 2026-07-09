@@ -36,7 +36,7 @@ use esp_hub75::{Color, Hub75, Hub75Pins16};
 use static_cell::StaticCell;
 
 use crate::localtime::{in_window, local_minutes};
-use crate::model::{DisplayState, UiMode};
+use crate::model::{DisplayState, Layout, UiMode};
 use crate::shared::DISPLAY;
 
 pub const ROWS: usize = 64;
@@ -235,17 +235,26 @@ pub async fn render_task(
         // state is parked in `pending` and only applied once the tram has cleared the panel.
         let mut frame: u32 = 0;
         let mut pending: Option<DisplayState> = None;
+        // Cache the drawn-from layout so the ~900 B `Layout` clone (T1.2) happens once per layout
+        // *change*, not per animation frame. Refreshed here on each (re)entry — every state change
+        // and every static-screen redraw breaks the inner loop and re-enters, so those paths are
+        // covered by this line. Only the two arms that keep looping *without* re-entering
+        // (a `REDRAW`/preview push while animating, and the preview auto-revert below) refresh
+        // inline; the per-frame tick deliberately does not, which is the whole point.
+        let mut layout_cache = refresh_layout_cache();
         loop {
             // Auto-revert an expired live preview before drawing, so the panel returns to the
             // persisted UI mode + layout even without an explicit `/preview/end` (phone locked,
-            // WiFi dropped, tab closed). `preview_layout()` then reads back `None` for this frame.
+            // WiFi dropped, tab closed). Refresh the cache right here so THIS frame draws the
+            // reverted layout, not the just-expired preview.
             if let Some(dl) = crate::shared::preview_deadline()
                 && Instant::now() >= dl
             {
                 crate::shared::end_preview();
+                layout_cache = refresh_layout_cache();
             }
             fb.erase();
-            let animating = draw_state(fb, &state, frame);
+            let animating = draw_state(fb, &state, &layout_cache, frame);
             tx.signal(fb);
             fb = rx.wait().await;
             // A state arrived earlier while the connecting animation was mid-pass — apply it
@@ -282,7 +291,9 @@ pub async fn render_task(
                 Either3::First(_) => frame = frame.wrapping_add(1),
                 Either3::Second(next) => {
                     // Hold the switch until the tram has finished a full pass; cut over
-                    // immediately for every other state.
+                    // immediately for every other state. The switch path `break`s and re-enters the
+                    // inner loop, which refreshes the cache; the `pending` (Connecting) path keeps
+                    // the same layout, so neither needs an inline refresh here.
                     if matches!(state, DisplayState::Connecting) && !screens::connect_cycle_done(frame) {
                         pending = Some(next);
                     } else {
@@ -290,15 +301,42 @@ pub async fn render_task(
                         break;
                     }
                 }
-                Either3::Third(_) => {} // preview push → redraw the current frame with the new mirror
+                // Preview push → redraw the current frame with the new mirror. This arm keeps
+                // animating without re-entering, so refresh the cache inline to pick up the change.
+                Either3::Third(_) => layout_cache = refresh_layout_cache(),
             }
         }
     }
 }
 
+/// The layout data [`draw_state`] draws the departures screen from, cloned out of the shared mirrors
+/// **once per layout change** rather than on every animation frame (the ~900 B `Layout` clone used
+/// to run up to 20×/s out of a critical section — see [`shared`](crate::shared)). `render_task`
+/// holds one and refreshes it via [`refresh_layout_cache`] only when the layout can actually have
+/// changed. Captures the preview-overrides-persisted-mode precedence: `preview` set means a live
+/// preview is active and overrides the UI mode; otherwise `custom` holds the saved custom layout
+/// (consulted only in [`UiMode::Custom`]). An empty layout in either still falls back to the
+/// built-in board — the drawing dispatch below is byte-for-byte the same decision as before.
+pub struct LayoutCache {
+    preview: Option<Layout>,
+    custom: Option<Layout>,
+}
+
+/// Clone the current layout state out of the shared mirrors for [`draw_state`]. Called only when the
+/// layout can have changed (see [`LayoutCache`]), so the clone stays off the per-frame path. A live
+/// preview overrides the persisted UI mode (§4.3), so when one is active the saved custom layout is
+/// unreachable this run and we skip cloning it.
+fn refresh_layout_cache() -> LayoutCache {
+    match crate::shared::preview_layout() {
+        Some(preview) => LayoutCache { preview: Some(preview), custom: None },
+        None => LayoutCache { preview: None, custom: crate::shared::custom_layout() },
+    }
+}
+
 /// Dispatch on the current state and draw it. Returns `true` if the screen is animating
-/// (a scrolling title) and should be redrawn on the next frame tick.
-pub fn draw_state(fb: &mut FBType, state: &DisplayState, frame: u32) -> bool {
+/// (a scrolling title) and should be redrawn on the next frame tick. Reads the departures-screen
+/// layout from the caller's [`LayoutCache`] instead of re-cloning it here every frame (T1.2).
+pub fn draw_state(fb: &mut FBType, state: &DisplayState, layout: &LayoutCache, frame: u32) -> bool {
     // Pick the brightness for this frame once; every colour is scaled to it via `scaled`.
     RENDER_BRIGHTNESS.store(current_brightness(), Ordering::Relaxed);
     match state {
@@ -309,11 +347,11 @@ pub fn draw_state(fb: &mut FBType, state: &DisplayState, frame: u32) -> bool {
             // A live preview (§4.3) forces the custom path regardless of the persisted UI mode, so
             // the user can design a Custom layout while the device is still in Default/Focus. An
             // empty preview falls back to the built-in board, same as an empty saved layout.
-            if let Some(preview) = crate::shared::preview_layout() {
+            if let Some(preview) = &layout.preview {
                 if preview.e.is_empty() {
                     screens::draw_departures(fb, station, deps, frame)
                 } else {
-                    custom::draw_custom_layout(fb, &preview, station, deps, frame)
+                    custom::draw_custom_layout(fb, preview, station, deps, frame)
                 }
             } else {
                 match crate::shared::ui_mode() {
@@ -321,9 +359,9 @@ pub fn draw_state(fb: &mut FBType, state: &DisplayState, frame: u32) -> bool {
                     UiMode::Default => screens::draw_departures(fb, station, deps, frame),
                     // Custom draws the user's saved layout; with no (or an empty) layout it falls
                     // back to the built-in board so the panel is never blank (§7.5).
-                    UiMode::Custom => match crate::shared::custom_layout() {
+                    UiMode::Custom => match &layout.custom {
                         Some(layout) if !layout.e.is_empty() => {
-                            custom::draw_custom_layout(fb, &layout, station, deps, frame)
+                            custom::draw_custom_layout(fb, layout, station, deps, frame)
                         }
                         _ => screens::draw_departures(fb, station, deps, frame),
                     },

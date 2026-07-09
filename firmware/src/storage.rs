@@ -132,14 +132,17 @@ impl Store {
         magic: u32,
         value: &T,
     ) -> Result<(), ()> {
-        let mut payload = [0u8; MAX_PAYLOAD];
-        let len = serde_json_core::to_slice(value, &mut payload).map_err(|_| ())?;
-
-        // [magic][len][payload], padded up to a 4-byte (WORD_SIZE) write boundary.
+        // [magic][len][payload], padded up to a 4-byte (WORD_SIZE) write boundary. Serialize the
+        // payload straight into its slot at `buf[8..]` and then back-fill the 8-byte header, rather
+        // than serializing into a separate `[u8; MAX_PAYLOAD]` and copying it in: the header
+        // (`0..8`) and payload (`8..`) regions don't overlap, so this drops a second 3 KiB array off
+        // the stack (halving this function's ~6 KiB footprint — the largest single stack user, on
+        // the tight core-0 stack). `buf` is zeroed, so the pad bytes past `8 + len` stay 0 and the
+        // on-disk record is byte-identical to before.
         let mut buf = [0u8; 8 + MAX_PAYLOAD + 4];
+        let len = serde_json_core::to_slice(value, &mut buf[8..8 + MAX_PAYLOAD]).map_err(|_| ())?;
         buf[0..4].copy_from_slice(&magic.to_le_bytes());
         buf[4..8].copy_from_slice(&(len as u32).to_le_bytes());
-        buf[8..8 + len].copy_from_slice(&payload[..len]);
         let total = (8 + len).div_ceil(4) * 4;
 
         let base = self.nvs_offset + sector;

@@ -271,25 +271,47 @@ async fn setup_index() -> impl IntoResponse {
     Response::ok(html(SETUP_HTML))
 }
 
+/// Response buffer cap for `GET /scan`. `SCAN_CACHE` holds up to 16 networks at ~55-90 B of JSON
+/// each, so a full cache can exceed this — deliberately: rather than statically sizing for the
+/// theoretical worst case (~16 × 100 B), we keep a modest buffer and stop cleanly if the next entry
+/// won't fit (RAM budget, T2.1). The guard in [`scan_handler`] makes that always emit a well-formed
+/// array; a truncated push would otherwise cut the JSON mid-element with no closing `]`, and the
+/// setup page's `JSON.parse` would fail and show an *empty* list exactly when the most APs are up.
+const SCAN_JSON_CAP: usize = 768;
+/// Worst case for one entry built below: the fixed template (~29 B) + a 32-char SSID whose every
+/// char escapes (×2 = 64 B) + `rssi` (≤4 B, "-128") + `secure` (≤5 B, "false") + a leading comma —
+/// comfortably under this, so the per-entry temp never itself truncates.
+const SCAN_ENTRY_CAP: usize = 128;
+
 async fn scan_handler() -> impl IntoResponse {
     // Kick off a fresh background rescan (merged into the cache, never destructive), then
     // return whatever we have right now. "Scan again" picks up the new results next tap.
     RESCAN_REQ.signal(());
     let cache = SCAN_CACHE.lock().await;
-    let mut out: String<768> = String::new();
+    let mut out: String<SCAN_JSON_CAP> = String::new();
     let _ = out.push('[');
     for (i, n) in cache.iter().enumerate() {
+        // Build the entry in a temp buffer so we can commit it all-or-nothing: a partially pushed
+        // entry would corrupt the array, so we only append once we know the whole thing fits.
+        let mut entry: String<SCAN_ENTRY_CAP> = String::new();
         if i > 0 {
-            let _ = out.push(',');
+            let _ = entry.push(',');
         }
-        let _ = out.push_str("{\"ssid\":\"");
+        let _ = entry.push_str("{\"ssid\":\"");
         for c in n.ssid.chars() {
             if c == '"' || c == '\\' {
-                let _ = out.push('\\');
+                let _ = entry.push('\\');
             }
-            let _ = out.push(c);
+            let _ = entry.push(c);
         }
-        let _ = write!(out, "\",\"rssi\":{},\"secure\":{}}}", n.rssi, n.secure);
+        let _ = write!(entry, "\",\"rssi\":{},\"secure\":{}}}", n.rssi, n.secure);
+
+        // Reserve one byte for the closing `]` that always follows. If this entry won't fit, stop
+        // here — the array built so far is valid JSON and gets closed below.
+        if out.capacity() - out.len() < entry.len() + 1 {
+            break;
+        }
+        let _ = out.push_str(&entry);
     }
     let _ = out.push(']');
     Response::ok(out)
@@ -316,7 +338,7 @@ pub async fn setup_server_task(stack: Stack<'static>) {
         .route("/connecttest.txt", get(setup_index))
         .route("/scan", get(scan_handler))
         .route("/connect", post(connect_handler));
-    crate::httpd::serve(&app, "portal", stack).await
+    crate::httpd::serve(&app, "portal", stack, crate::httpd::server_buffers()).await
 }
 
 /// Create the static IPv4 config for the SoftAP (192.168.4.1/24).

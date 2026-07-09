@@ -49,7 +49,9 @@ async fn main(spawner: Spawner) -> ! {
     let p = esp_hal::init(config);
 
     // Internal-RAM heap from reclaimed bootloader RAM (no `.bss` cost) — keeps WiFi's
-    // DMA-capable allocations in on-chip SRAM. The large TLS/HTTP buffers live in PSRAM.
+    // DMA-capable allocations in on-chip SRAM. The large TLS/HTTP buffers are kept out of it and
+    // in PSRAM instead, enforced explicitly by `poll.rs` (which allocates them in `ExternalMemory`
+    // rather than trusting a plain `vec![]`, which esp-alloc's first-fit would place here).
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73_744);
     // 8 MB external PSRAM (N16R8) added as a second heap region for the big poll buffers.
     esp_alloc::psram_allocator!(p.PSRAM, esp_hal::psram);
@@ -139,6 +141,11 @@ async fn main(spawner: Spawner) -> ! {
     let button = Input::new(p.GPIO0, InputConfig::default().with_pull(Pull::Up));
     spawner.spawn(button_task(button).unwrap());
 
+    // One `StackResources<8>` for the network stack, hoisted above the match so only ONE is
+    // reserved. Exactly one boot arm runs (captive portal XOR connected), so the other never touches
+    // it; a single `mk_static!` — vs one per arm, each of which expands its own `static` (see
+    // `mk_static!` in lib.rs) — keeps the second, forever-dead `StackResources<8>` out of `.bss`.
+    let resources = mk_static!(StackResources<8>, StackResources::new());
     match creds {
         None => {
             // ---------------- Phase 1: captive portal ----------------
@@ -146,7 +153,6 @@ async fn main(spawner: Spawner) -> ! {
             DISPLAY.signal(DisplayState::Provisioning);
 
             let device = interfaces.access_point;
-            let resources = mk_static!(StackResources<8>, StackResources::new());
             let (stack, runner) = embassy_net::new(device, portal::ap_net_config(), resources, seed);
 
             spawner.spawn(wifi::net_task(runner).unwrap());
@@ -171,7 +177,6 @@ async fn main(spawner: Spawner) -> ! {
             let _ = wifi::apply_sta(&mut controller, &creds);
 
             let device = interfaces.station;
-            let resources = mk_static!(StackResources<8>, StackResources::new());
             let (stack, runner) =
                 embassy_net::new(device, NetConfig::dhcpv4(Default::default()), resources, seed);
 

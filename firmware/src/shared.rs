@@ -44,8 +44,10 @@ static UI_MODE: AtomicU8 = AtomicU8::new(0); // 0=Default, 1=Focus, 2=Custom
 
 /// Live mirror of the persisted custom [`Layout`], read by the render task in Custom mode. A
 /// `Layout` is far larger than an atomic, so it sits behind a critical-section mutex (like
-/// [`SELECTION`]); the render task clones it out once per redraw, which is event-driven — not
-/// per-DMA-frame — so the brief lock is acceptable. `None` = no custom layout saved.
+/// [`SELECTION`]); the render task clones it out into its
+/// [`LayoutCache`](crate::display::LayoutCache) only when the layout can change (a new display
+/// state, a preview push, or a preview auto-revert) — never per animation frame — so the brief lock
+/// is acceptable. `None` = no custom layout saved.
 ///
 /// The layout is boxed **into PSRAM** ([`ExternalMemory`]) so it touches neither of the two scarce
 /// internal-RAM budgets: an inline `~900-byte` `Layout` in `.bss` would push down the core-0 stack
@@ -73,11 +75,15 @@ pub fn apply_config(cfg: &Config) {
 
 /// Replace the live custom-layout mirror (boot load from flash, or a `POST /layout`). Pass `None`
 /// to clear it. The new layout is boxed and the old one dropped **outside** the critical section, so
-/// no heap allocation/free runs while interrupts are disabled.
+/// no heap allocation/free runs while interrupts are disabled. Wakes the render task (like
+/// [`set_preview`]/[`end_preview`]) so its `LayoutCache` picks the change up on the next redraw —
+/// without this, an animating Custom screen would keep drawing the old layout until the next
+/// `DISPLAY` state arrived (a whole poll round-trip after a `POST /layout`).
 pub fn apply_layout(layout: Option<Layout>) {
     let boxed = layout.map(|l| Box::new_in(l, ExternalMemory));
     let old = CUSTOM_LAYOUT.lock(|cell| cell.replace(boxed));
     drop(old);
+    REDRAW.signal(());
 }
 
 /// Clone the current custom layout out of the mirror for the render task. Returns `None` when no

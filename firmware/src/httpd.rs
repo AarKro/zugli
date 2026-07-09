@@ -6,6 +6,7 @@
 //! no reboot (brief §4.4).
 
 use core::fmt::Write as _;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use embassy_net::Stack;
 use embassy_time::Duration;
@@ -16,6 +17,7 @@ use picoserve::response::{Content, IntoResponse, Response};
 use picoserve::routing::{get, post};
 use picoserve::io::Write;
 use picoserve::{Config, Router, Timeouts};
+use static_cell::StaticCell;
 
 use crate::model::{Config as BoardConfig, Layout, Selection};
 use crate::shared::{self, SELECTION, SELECTION_CHANGED};
@@ -114,10 +116,16 @@ async fn save(Json(sel): Json<Selection>) -> impl IntoResponse {
     Response::ok(ok())
 }
 
+/// Capacity for the serialized config JSON. Sized for exactly the field set written below
+/// (`stripCity`, `showLineBadges`, `brightness`, `autoBrightness`, `offWhenDimmed`, `reducedStart`,
+/// `reducedEnd`, `uiMode` — ~150 B today) with headroom; if a future field pushes past it we return
+/// `{}` rather than a truncated, unparseable object (see [`get_config`]).
+const CONFIG_JSON_CAP: usize = 224;
+
 /// Current board settings, for the config page's settings sheet to pre-fill its controls.
 async fn get_config() -> impl IntoResponse {
-    let mut body: String<224> = String::new();
-    let _ = write!(
+    let mut body: String<CONFIG_JSON_CAP> = String::new();
+    if write!(
         body,
         "{{\"stripCity\":{},\"showLineBadges\":{},\"brightness\":{},\"autoBrightness\":{},\"offWhenDimmed\":{},\"reducedStart\":{},\"reducedEnd\":{},\"uiMode\":{}}}",
         shared::strip_city_enabled(),
@@ -128,7 +136,16 @@ async fn get_config() -> impl IntoResponse {
         shared::reduced_start_min(),
         shared::reduced_end_min(),
         shared::ui_mode() as u8,
-    );
+    )
+    .is_err()
+    {
+        // Overflow means a newly added field outgrew CONFIG_JSON_CAP: emit valid-but-empty JSON
+        // instead of a half-written object. The page reads `{}` as "no settings" and keeps its
+        // current control values, and the error names the fix (bump the cap).
+        log::error!("config: serialized config exceeds {CONFIG_JSON_CAP} B — returning {{}} (raise CONFIG_JSON_CAP)");
+        body.clear();
+        let _ = body.push_str("{}");
+    }
     Response::ok(OwnedJson(body))
 }
 
@@ -155,6 +172,15 @@ async fn set_config(Json(cfg): Json<BoardConfig>) -> impl IntoResponse {
 static mut JSON_TX_BUF: [u8; crate::model::LAYOUT_MAX_BYTES] =
     [0u8; crate::model::LAYOUT_MAX_BYTES];
 
+/// Reentrancy guard for [`JSON_TX_BUF`] (T2.3): set on entry to `raw_json`, cleared once the write +
+/// slice build are done. A failed `compare_exchange` means two `raw_json` serializations overlapped
+/// — impossible today (`serve()` handles one connection at a time; see its SAFETY-INVARIANT), so it
+/// would signal a future concurrency regression that silently aliased the shared buffer. This
+/// hardens the existing single-connection invariant into something enforceable rather than
+/// replacing it: it guards the *write window*, and the returned slice stays sound because `serve()`
+/// fully flushes each response before the next request (so the buffer isn't overwritten under it).
+static JSON_TX_IN_USE: AtomicBool = AtomicBool::new(false);
+
 /// Serialize `value` into [`JSON_TX_BUF`] with **serde-json-core** (a synchronous call) and hand
 /// out the borrowed slice as a [`Body`]. Serializing synchronously matters as much as borrowing:
 /// picoserve's own `response::Json` drives serde into an *async* writer, so a deep type's whole
@@ -162,6 +188,17 @@ static mut JSON_TX_BUF: [u8; crate::model::LAYOUT_MAX_BYTES] =
 /// An over-budget serialize (can't happen for values that respect the schema bounds) degrades to
 /// `{}` rather than failing the request.
 fn raw_json<T: serde::Serialize>(value: &T) -> Body {
+    // Claim the shared buffer for the duration of the serialize + slice build. A failed claim means
+    // a concurrent `raw_json` (see [`JSON_TX_IN_USE`]): panic in debug to catch it in test, and in
+    // release degrade to `{}` rather than hand out a slice of a buffer another writer is mid-write.
+    if JSON_TX_IN_USE
+        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
+        debug_assert!(false, "raw_json re-entered: JSON_TX_BUF aliased (serve() must be single-connection)");
+        log::error!("raw_json re-entered concurrently — returning empty JSON");
+        return Body { content_type: "application/json", body: b"{}" };
+    }
     let ptr = core::ptr::addr_of_mut!(JSON_TX_BUF);
     let len = serde_json_core::to_slice(value, unsafe { &mut *ptr }).unwrap_or(0);
     let body: &'static [u8] = if len == 0 {
@@ -169,6 +206,10 @@ fn raw_json<T: serde::Serialize>(value: &T) -> Body {
     } else {
         unsafe { core::slice::from_raw_parts(ptr as *const u8, len) }
     };
+    // Write done → release the guard. The returned slice remains valid because `serve()` fully
+    // writes each response before accepting the next request (its SAFETY-INVARIANT), so no other
+    // `raw_json` overwrites these bytes before they are flushed.
+    JSON_TX_IN_USE.store(false, Ordering::Release);
     Body { content_type: "application/json", body }
 }
 
@@ -257,20 +298,57 @@ async fn end_preview() -> impl IntoResponse {
     Response::ok(ok())
 }
 
+/// The three network buffers [`serve`] needs, bundled so a **single** [`StaticCell`]
+/// ([`SERVER_BUFFERS`]) backs both the config server and the captive-portal setup server. Only one
+/// of those two tasks ever runs per boot (STA config XOR provisioning), but both task futures link
+/// into the binary; without sharing, each would reserve its own 7,168 B set in `.bss`. Sizes are the
+/// proven values (see [`serve`]): tcp_rx windows a body across segments, tcp_tx holds the largest
+/// response, http_buf a `/layout` body + headers.
+pub struct ServerBuffers {
+    tcp_rx: [u8; 1024],
+    tcp_tx: [u8; 4096],
+    http_buf: [u8; 2048],
+}
+
+/// Backing store for the one shared [`ServerBuffers`] set, taken at runtime by whichever server task
+/// actually spawns.
+static SERVER_BUFFERS: StaticCell<ServerBuffers> = StaticCell::new();
+
+/// Take the shared server buffers. **Panics if called more than once per boot** — which is exactly
+/// what enforces the "only one HTTP server per boot" invariant (STA config server XOR captive-portal
+/// setup server) that sharing one buffer set makes load-bearing. Call once, from the single server
+/// task that runs.
+///
+/// Zeroed **in place** rather than built via `init(ServerBuffers { .. })`, which would materialise
+/// the 7,168 B struct as a stack temporary before the memcpy into the cell — the same hazard
+/// `display::framebuffers()` documents (its 28 KB temporary overflowed the boot stack).
+pub fn server_buffers() -> &'static mut ServerBuffers {
+    let slot = SERVER_BUFFERS.uninit();
+    // SAFETY: `ServerBuffers` is three plain `[u8; N]` arrays — all-zero bytes are a valid,
+    // fully-initialised value.
+    unsafe {
+        slot.as_mut_ptr().write_bytes(0, 1);
+        slot.assume_init_mut()
+    }
+}
+
 /// Run a picoserve HTTP server on port 80, forever — the loop shared by this config server and
 /// the captive-portal setup server. Handles one connection at a time, re-listening after each
 /// connection closes.
 ///
-/// The buffers live in the calling task's future (its static embassy arena), which sits in `.bss`
-/// and so pushes down the core-0 main-task stack floor (`_stack_end_cpu0`) — where the poll task's
-/// TLS handshake + stationboard JSON parse run and are already near the limit (see poll.rs /
-/// commit 78c5126). Keep them at the proven sizes: http_buf 2048 holds a realistic `/layout` body
-/// (~0.5 KB, worst-case valid ~1.5 KB) plus headers, and tcp_rx 1024 windows a larger body across
-/// segments.
+/// The buffers live in one shared static ([`SERVER_BUFFERS`], taken via [`server_buffers`]) rather
+/// than as locals in the calling task's future. They still sit in static DRAM either way, but only
+/// one server runs per boot (STA config XOR provisioning), so sharing reserves ONE set instead of
+/// baking a copy into each of the two task futures — halving the reservation that pushes down the
+/// core-0 main-task stack floor (`_stack_end_cpu0`), where the poll task's TLS handshake +
+/// stationboard JSON parse run and are already near the limit (see poll.rs / commit 78c5126). Keep
+/// them at the proven sizes: http_buf 2048 holds a realistic `/layout` body (~0.5 KB, worst-case
+/// valid ~1.5 KB) plus headers, and tcp_rx 1024 windows a larger body across segments.
 pub async fn serve<P: picoserve::routing::PathRouter>(
     app: &Router<P>,
     name: &'static str,
     stack: Stack<'static>,
+    buffers: &'static mut ServerBuffers,
 ) -> ! {
     let config = Config::new(Timeouts {
         start_read_request: Duration::from_secs(10),
@@ -279,13 +357,14 @@ pub async fn serve<P: picoserve::routing::PathRouter>(
         write: Duration::from_secs(10),
     });
 
-    let mut tcp_rx = [0u8; 1024];
-    let mut tcp_tx = [0u8; 4096];
-    let mut http_buf = [0u8; 2048];
-
     loop {
-        let _ = picoserve::Server::new(app, &config, &mut http_buf)
-            .listen_and_serve(name, stack, 80, &mut tcp_rx, &mut tcp_tx)
+        // SAFETY-INVARIANT: this loop serves ONE connection at a time and fully writes each response
+        // — including the borrowed `raw_json`/`JSON_TX_BUF` slices — before `listen_and_serve`
+        // returns and the next request is accepted. That serialization is what makes the shared
+        // `static mut JSON_TX_BUF` slice sound and the `JSON_TX_IN_USE` guard's clear-on-exit
+        // correct; a move to concurrent connections would break both.
+        let _ = picoserve::Server::new(app, &config, &mut buffers.http_buf)
+            .listen_and_serve(name, stack, 80, &mut buffers.tcp_rx, &mut buffers.tcp_tx)
             .await;
     }
 }
@@ -302,5 +381,5 @@ pub async fn config_server_task(stack: Stack<'static>) {
         .route("/layout", get(get_layout).post(set_layout))
         .route("/preview", post(set_preview))
         .route("/preview/end", post(end_preview));
-    serve(&app, "config", stack).await
+    serve(&app, "config", stack, server_buffers()).await
 }
