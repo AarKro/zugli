@@ -25,13 +25,14 @@ use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::rng::Rng;
 use esp_hal::system::Stack;
 use esp_hal::timer::timg::TimerGroup;
+use esp_radio::wifi::WifiController;
 use log::info;
 use static_cell::ConstStaticCell;
 
 use firmware::display::{self, Hub75Peripherals};
 use firmware::httpd::config_server_task;
 use firmware::mdns::mdns_task;
-use firmware::model::DisplayState;
+use firmware::model::{DisplayState, Selection, WifiCreds};
 use firmware::poll::poll_task;
 use firmware::shared::{self, DISPLAY, SELECTION, SELECTION_CHANGED};
 use firmware::storage::{self, STORE};
@@ -149,54 +150,88 @@ async fn main(spawner: Spawner) -> ! {
     match creds {
         None => {
             // ---------------- Phase 1: captive portal ----------------
-            info!("zugli: no creds → captive portal");
-            DISPLAY.signal(DisplayState::Provisioning);
-
-            let device = interfaces.access_point;
-            let (stack, runner) = embassy_net::new(device, portal::ap_net_config(), resources, seed);
-
-            spawner.spawn(wifi::net_task(runner).unwrap());
-            spawner.spawn(portal::portal_wifi_task(controller).unwrap());
-            spawner.spawn(portal::dhcp_task(stack).unwrap());
-            spawner.spawn(portal::dns_task(stack).unwrap());
-            spawner.spawn(portal::setup_server_task(stack).unwrap());
-            // Serve `zugli.local` over mDNS on the SoftAP too, so the setup page is reachable
-            // by name (not just the bare IP). `.local` is resolved via mDNS rather than the
-            // catch-all DNS, so it needs this responder; it answers with 192.168.4.1 (read
-            // live from the AP stack). Same name works here and once the board is on WiFi.
-            spawner.spawn(mdns_task(stack).unwrap());
+            boot_provisioning(spawner, controller, interfaces.access_point, resources, seed).await;
         }
         Some(creds) => {
             // ---------------- Phase 2 + 3: connected ----------------
-            info!("zugli: joining {}", creds.ssid.as_str());
-            // Startup animation while the radio associates + DHCP/SNTP come up in the
-            // background. The render task replaces it with the board (idle address or
-            // departures) once those land, after at least one full pass of the tram.
-            DISPLAY.signal(DisplayState::Connecting);
-            let mut controller = controller;
-            let _ = wifi::apply_sta(&mut controller, &creds);
-
-            let device = interfaces.station;
-            let (stack, runner) =
-                embassy_net::new(device, NetConfig::dhcpv4(Default::default()), resources, seed);
-
-            spawner.spawn(wifi::net_task(runner).unwrap());
-            spawner.spawn(wifi::sta_connection_task(controller).unwrap());
-
-            if let Some(sel) = selection {
-                *SELECTION.lock().await = Some(sel);
-            }
-
-            spawner.spawn(net_ready_task(stack).unwrap());
-            spawner.spawn(config_server_task(stack).unwrap());
-            spawner.spawn(mdns_task(stack).unwrap());
-            spawner.spawn(poll_task(stack, seed).unwrap());
+            boot_connected(
+                spawner,
+                controller,
+                interfaces.station,
+                resources,
+                seed,
+                creds,
+                selection,
+            )
+            .await;
         }
     }
 
     loop {
         Timer::after(Duration::from_secs(60)).await;
     }
+}
+
+/// Phase 1 boot arm: bring up the SoftAP captive portal (no WiFi credentials saved yet). Spawns
+/// the WiFi scan+join manager plus the portal's DHCP/DNS/HTTP/mDNS tasks and returns; nothing here
+/// actually awaits (`async` only so the call site reads the same as [`boot_connected`]'s).
+async fn boot_provisioning(
+    spawner: Spawner,
+    controller: WifiController<'static>,
+    device: wifi::WifiDevice,
+    resources: &'static mut StackResources<8>,
+    seed: u64,
+) {
+    info!("zugli: no creds → captive portal");
+    DISPLAY.signal(DisplayState::Provisioning);
+
+    let (stack, runner) = embassy_net::new(device, portal::ap_net_config(), resources, seed);
+
+    spawner.spawn(wifi::net_task(runner).unwrap());
+    spawner.spawn(portal::portal_wifi_task(controller).unwrap());
+    spawner.spawn(portal::dhcp_task(stack).unwrap());
+    spawner.spawn(portal::dns_task(stack).unwrap());
+    spawner.spawn(portal::setup_server_task(stack).unwrap());
+    // Serve `zugli.local` over mDNS on the SoftAP too, so the setup page is reachable
+    // by name (not just the bare IP). `.local` is resolved via mDNS rather than the
+    // catch-all DNS, so it needs this responder; it answers with 192.168.4.1 (read
+    // live from the AP stack). Same name works here and once the board is on WiFi.
+    spawner.spawn(mdns_task(stack).unwrap());
+}
+
+/// Phase 2 + 3 boot arm: join the saved network, then serve the config page, mDNS, and the poll
+/// loop. The only `.await` is installing the persisted selection into the live [`SELECTION`]
+/// mirror before the poll task starts reading it.
+async fn boot_connected(
+    spawner: Spawner,
+    mut controller: WifiController<'static>,
+    device: wifi::WifiDevice,
+    resources: &'static mut StackResources<8>,
+    seed: u64,
+    creds: WifiCreds,
+    selection: Option<Selection>,
+) {
+    info!("zugli: joining {}", creds.ssid.as_str());
+    // Startup animation while the radio associates + DHCP/SNTP come up in the
+    // background. The render task replaces it with the board (idle address or
+    // departures) once those land, after at least one full pass of the tram.
+    DISPLAY.signal(DisplayState::Connecting);
+    let _ = wifi::apply_sta(&mut controller, &creds);
+
+    let (stack, runner) =
+        embassy_net::new(device, NetConfig::dhcpv4(Default::default()), resources, seed);
+
+    spawner.spawn(wifi::net_task(runner).unwrap());
+    spawner.spawn(wifi::sta_connection_task(controller).unwrap());
+
+    if let Some(sel) = selection {
+        *SELECTION.lock().await = Some(sel);
+    }
+
+    spawner.spawn(net_ready_task(stack).unwrap());
+    spawner.spawn(config_server_task(stack).unwrap());
+    spawner.spawn(mdns_task(stack).unwrap());
+    spawner.spawn(poll_task(stack, seed).unwrap());
 }
 
 /// Once the network is up: record the IP, show the idle/address screen if nothing is

@@ -250,8 +250,10 @@ async fn fetch(
 /// Parse the stationboard body and build the up-to-three soonest departures the panel should
 /// show — every connection in all-connections mode, or only the user's picks otherwise.
 fn parse_departures(body: &[u8], sel: &Selection) -> Option<Departures> {
-    // Scratch space for decoding JSON `\uXXXX` escapes (e.g. `ü`); must fit the longest single
-    // unescaped string, so it tracks the largest field capacity above (`to`, now 64).
+    // Scratch space for decoding JSON `\uXXXX` escapes (e.g. `ü`). Rule (shared with
+    // `storage.rs`'s unescape scratch): this buffer must hold the longest single *decoded* field
+    // `Board` can contain. Here that's `Entry::to`, a `String<64>` destination, so 96 B leaves
+    // margin.
     let mut unescape = [0u8; 96];
     let board = match serde_json_core::from_slice_escaped::<Board>(body, &mut unescape) {
         Ok((b, _)) => b,

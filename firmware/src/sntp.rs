@@ -5,10 +5,11 @@
 //! timestamp from the reply. Absolute Unix time means no timezone math is needed (§6.2).
 
 use embassy_net::dns::DnsQueryType;
-use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{IpAddress, IpEndpoint, Stack};
 use embassy_time::{Duration, with_timeout};
 use log::{info, warn};
+
+use crate::udp::UdpBuffers;
 
 /// Seconds between the NTP epoch (1900) and the Unix epoch (1970).
 const NTP_TO_UNIX: i64 = 2_208_988_800;
@@ -23,11 +24,8 @@ pub async fn sync(stack: Stack<'_>) -> Option<i64> {
         _ => None,
     })?;
 
-    let mut rx_meta = [PacketMetadata::EMPTY; 4];
-    let mut tx_meta = [PacketMetadata::EMPTY; 4];
-    let mut rx_buf = [0u8; 128];
-    let mut tx_buf = [0u8; 128];
-    let mut sock = UdpSocket::new(stack, &mut rx_meta, &mut rx_buf, &mut tx_meta, &mut tx_buf);
+    let mut bufs = UdpBuffers::<128, 128, 4>::new();
+    let mut sock = bufs.socket(stack);
     sock.bind(0).ok()?;
 
     // LI = 0, VN = 3, Mode = 3 (client).

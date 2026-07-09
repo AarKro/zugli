@@ -24,6 +24,7 @@ pub mod portal;
 pub mod shared;
 pub mod sntp;
 pub mod storage;
+pub mod udp;
 pub mod wifi;
 
 /// Open SoftAP SSID shown during provisioning (PROJECT_BRIEF.md §0/§5.1).

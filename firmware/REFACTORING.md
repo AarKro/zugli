@@ -1,5 +1,13 @@
 # Firmware Refactoring Plan — Memory & Resource Audit
 
+> **Implementation status:** T1.1–T1.4, T2.1–T2.3, T3.1, T3.2, T3.4, and T3.5 are
+> implemented on this branch. Two amendments were made during review: `apply_layout`
+> now fires `REDRAW` so the T1.2 cache picks up a `POST /layout` without waiting for a
+> poll round-trip, and the T1.4 shared buffers are zeroed in place (avoiding a 7 KiB
+> stack temporary — the hazard `framebuffers()` documents). Deliberately not done:
+> **T1.5** (glyph cache — profile after T1.2 before adding cache complexity), **T2.4**
+> (boot panics are acceptable as-is), **T3.3** (DNS packing dedup — low value).
+
 A full-codebase audit of `firmware/` (~3,900 lines) focused on the known bottleneck:
 memory and general resource consumption on the ESP32-S3. Every finding below cites the
 code it comes from, and every Tier 1 finding was verified against the actual source

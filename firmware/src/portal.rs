@@ -12,7 +12,6 @@
 use core::fmt::Write as _;
 
 use embassy_futures::select::{Either, select};
-use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{IpAddress, IpEndpoint, Stack};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
@@ -28,6 +27,7 @@ use picoserve::Router;
 use crate::httpd::{html, json};
 use crate::model::WifiCreds;
 use crate::storage;
+use crate::udp::UdpBuffers;
 use crate::wifi::{self, WifiDevice};
 use esp_radio::wifi::sta::StationConfig;
 use esp_radio::wifi::{AuthenticationMethod, Config as WifiConfig, WifiController};
@@ -36,6 +36,11 @@ const SETUP_HTML: &str = include_str!("../../web/setup.html");
 
 /// AP gateway / portal address.
 const AP_IP: [u8; 4] = [192, 168, 4, 1];
+
+/// TTL on the catch-all DNS answer ([`dns_task`]). Short-lived on purpose: every query gets
+/// re-answered rather than cached for long, and the portal is only up for the few minutes of
+/// setup anyway.
+const DNS_ANSWER_TTL_SECS: u32 = 60;
 
 /// One scanned network for the setup page list.
 #[derive(Clone)]
@@ -166,11 +171,8 @@ pub async fn dhcp_task(stack: Stack<'static>) {
     use edge_dhcp::server::{Server, ServerOptions};
     use edge_dhcp::{Ipv4Addr as DhcpIpv4, Options, Packet};
 
-    let mut rx_meta = [PacketMetadata::EMPTY; 8];
-    let mut tx_meta = [PacketMetadata::EMPTY; 8];
-    let mut rx_buf = [0u8; 1024];
-    let mut tx_buf = [0u8; 1024];
-    let mut sock = UdpSocket::new(stack, &mut rx_meta, &mut rx_buf, &mut tx_meta, &mut tx_buf);
+    let mut bufs = UdpBuffers::<1024, 1024, 8>::new();
+    let mut sock = bufs.socket(stack);
     if sock.bind(67).is_err() {
         warn!("dhcp: bind failed");
         return;
@@ -209,11 +211,8 @@ pub async fn dhcp_task(stack: Stack<'static>) {
 
 #[embassy_executor::task]
 pub async fn dns_task(stack: Stack<'static>) {
-    let mut rx_meta = [PacketMetadata::EMPTY; 8];
-    let mut tx_meta = [PacketMetadata::EMPTY; 8];
-    let mut rx_buf = [0u8; 512];
-    let mut tx_buf = [0u8; 512];
-    let mut sock = UdpSocket::new(stack, &mut rx_meta, &mut rx_buf, &mut tx_meta, &mut tx_buf);
+    let mut bufs = UdpBuffers::<512, 512, 8>::new();
+    let mut sock = bufs.socket(stack);
     if sock.bind(53).is_err() {
         warn!("dns: bind failed");
         return;
@@ -249,12 +248,12 @@ pub async fn dns_task(stack: Stack<'static>) {
         resp[8..12].copy_from_slice(&[0, 0, 0, 0]);
         // Question, copied verbatim.
         resp[12..qend].copy_from_slice(&query[12..qend]);
-        // Answer: name pointer → 0x0C, type A, class IN, TTL 60, rdlength 4, AP IP.
+        // Answer: name pointer → 0x0C, type A, class IN, TTL DNS_ANSWER_TTL_SECS, rdlength 4, AP IP.
         let mut p = qend;
         resp[p..p + 2].copy_from_slice(&[0xC0, 0x0C]);
         resp[p + 2..p + 4].copy_from_slice(&[0, 1]);
         resp[p + 4..p + 6].copy_from_slice(&[0, 1]);
-        resp[p + 6..p + 10].copy_from_slice(&[0, 0, 0, 60]);
+        resp[p + 6..p + 10].copy_from_slice(&DNS_ANSWER_TTL_SECS.to_be_bytes());
         resp[p + 10..p + 12].copy_from_slice(&[0, 4]);
         resp[p + 12..p + 16].copy_from_slice(&AP_IP);
         p += 16;

@@ -10,14 +10,19 @@
 //! parse the question, match our labels, emit one answer record. The address we hand out
 //! is read live from the network stack, so it always reflects the current DHCP lease.
 
-use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{IpAddress, IpEndpoint, Stack};
 use embassy_time::{Duration, Timer};
 use log::{info, warn};
 
+use crate::udp::UdpBuffers;
+
 /// Link-local mDNS multicast group + port (RFC 6762).
 const MDNS_GROUP: IpAddress = IpAddress::v4(224, 0, 0, 251);
 const MDNS_PORT: u16 = 5353;
+
+/// RFC 6762 §10 recommends a short TTL for records whose value (here, our IP) can change — much
+/// shorter than the RFC 1035 default of an hour. 120 s matches common responder implementations.
+const MDNS_TTL_SECS: u32 = 120;
 
 /// The two labels of `zugli.local` (the trailing root label is the terminating `0x00`).
 const LABELS: [&[u8]; 2] = [b"zugli", b"local"];
@@ -41,11 +46,8 @@ pub async fn mdns_task(stack: Stack<'static>) {
     }
     info!("mdns: serving zugli.local");
 
-    let mut rx_meta = [PacketMetadata::EMPTY; 8];
-    let mut tx_meta = [PacketMetadata::EMPTY; 8];
-    let mut rx_buf = [0u8; 512];
-    let mut tx_buf = [0u8; 512];
-    let mut sock = UdpSocket::new(stack, &mut rx_meta, &mut rx_buf, &mut tx_meta, &mut tx_buf);
+    let mut bufs = UdpBuffers::<512, 512, 8>::new();
+    let mut sock = bufs.socket(stack);
     if sock.bind(MDNS_PORT).is_err() {
         warn!("mdns: bind failed");
         return;
@@ -169,10 +171,10 @@ fn build_response(out: &mut [u8; 64], ip: [u8; 4]) -> usize {
     out[p] = 0; // root label
     p += 1;
 
-    // TYPE A, CLASS IN with the cache-flush bit (0x8001), TTL 120 s, RDLENGTH 4, the IP.
+    // TYPE A, CLASS IN with the cache-flush bit (0x8001), TTL MDNS_TTL_SECS, RDLENGTH 4, the IP.
     out[p..p + 2].copy_from_slice(&[0x00, 0x01]);
     out[p + 2..p + 4].copy_from_slice(&[0x80, 0x01]);
-    out[p + 4..p + 8].copy_from_slice(&[0x00, 0x00, 0x00, 0x78]);
+    out[p + 4..p + 8].copy_from_slice(&MDNS_TTL_SECS.to_be_bytes());
     out[p + 8..p + 10].copy_from_slice(&[0x00, 0x04]);
     out[p + 10..p + 14].copy_from_slice(&ip);
     p + 14
