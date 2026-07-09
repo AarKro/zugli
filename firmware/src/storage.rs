@@ -113,9 +113,10 @@ impl Store {
             return None;
         }
         // Decode any `\uXXXX` escapes (e.g. `ü`) so the loaded value matches what was saved;
-        // plain `from_slice` would leave them literal. Sized for the longest field value: a
-        // `String<24>` Text literal of all-accented chars escapes to 24×6 = 144 B, so 256 B has
-        // margin (FEATURE_UI_BUILDER §6 pt. 4).
+        // plain `from_slice` would leave them literal. Rule (shared with `poll.rs`'s unescape
+        // scratch): this buffer must hold the longest single *decoded* field `T` can contain.
+        // `Persisted`'s largest is `String<64>` (`WifiCreds::password`, `Selection::stop_name`),
+        // so 256 B leaves generous margin (FEATURE_UI_BUILDER §6 pt. 4).
         let mut unescape = [0u8; 256];
         match serde_json_core::from_slice_escaped::<T>(&scratch[..len], &mut unescape) {
             Ok((v, _)) => Some(v),
@@ -132,14 +133,17 @@ impl Store {
         magic: u32,
         value: &T,
     ) -> Result<(), ()> {
-        let mut payload = [0u8; MAX_PAYLOAD];
-        let len = serde_json_core::to_slice(value, &mut payload).map_err(|_| ())?;
-
-        // [magic][len][payload], padded up to a 4-byte (WORD_SIZE) write boundary.
+        // [magic][len][payload], padded up to a 4-byte (WORD_SIZE) write boundary. Serialize the
+        // payload straight into its slot at `buf[8..]` and then back-fill the 8-byte header, rather
+        // than serializing into a separate `[u8; MAX_PAYLOAD]` and copying it in: the header
+        // (`0..8`) and payload (`8..`) regions don't overlap, so this drops a second 3 KiB array off
+        // the stack (halving this function's ~6 KiB footprint — the largest single stack user, on
+        // the tight core-0 stack). `buf` is zeroed, so the pad bytes past `8 + len` stay 0 and the
+        // on-disk record is byte-identical to before.
         let mut buf = [0u8; 8 + MAX_PAYLOAD + 4];
+        let len = serde_json_core::to_slice(value, &mut buf[8..8 + MAX_PAYLOAD]).map_err(|_| ())?;
         buf[0..4].copy_from_slice(&magic.to_le_bytes());
         buf[4..8].copy_from_slice(&(len as u32).to_le_bytes());
-        buf[8..8 + len].copy_from_slice(&payload[..len]);
         let total = (8 + len).div_ceil(4) * 4;
 
         let base = self.nvs_offset + sector;
@@ -170,6 +174,18 @@ impl Store {
         self.write_record(STORE_SECTOR, MAGIC, all)
     }
 
+    /// Read-modify-write the persisted record: read it whole, let `f` mutate the one field it
+    /// cares about, then write it whole back. Every `save_*` method below is this shape — reading
+    /// the other fields back only to write them out unchanged — because the flash format keeps
+    /// everything in a single record (see the module doc comment for why). Flash access is
+    /// synchronous (like the rest of `Store`'s methods) — the `async` in `storage::persist` is
+    /// only about serializing access to the shared [`STORE`] mutex, not about this call itself.
+    fn update(&mut self, f: impl FnOnce(&mut Persisted)) -> Result<(), ()> {
+        let mut all = self.read_all();
+        f(&mut all);
+        self.write_all(&all)
+    }
+
     /// Everything needed at boot — `(wifi, selection, config, layout)` — read from flash in one
     /// pass instead of one `read_all` per field. The config comes back already migrated.
     pub fn load_boot(&mut self) -> (Option<WifiCreds>, Option<Selection>, Config, Option<Layout>) {
@@ -179,9 +195,7 @@ impl Store {
     }
 
     pub fn save_wifi(&mut self, creds: &WifiCreds) -> Result<(), ()> {
-        let mut all = self.read_all();
-        all.wifi = Some(creds.clone());
-        self.write_all(&all)
+        self.update(|all| all.wifi = Some(creds.clone()))
     }
 
     /// Wipe everything — WiFi credentials *and* the saved connection (UC3, brief §7.9).
@@ -190,15 +204,11 @@ impl Store {
     }
 
     pub fn save_selection(&mut self, sel: &Selection) -> Result<(), ()> {
-        let mut all = self.read_all();
-        all.selection = Some(sel.clone());
-        self.write_all(&all)
+        self.update(|all| all.selection = Some(sel.clone()))
     }
 
     pub fn save_config(&mut self, cfg: &Config) -> Result<(), ()> {
-        let mut all = self.read_all();
-        all.config = *cfg;
-        self.write_all(&all)
+        self.update(|all| all.config = *cfg)
     }
 
     pub fn load_layout(&mut self) -> Option<Layout> {
@@ -208,9 +218,7 @@ impl Store {
     /// Persist the custom layout, or clear it when `layout` is `None` (an empty layout is stored as
     /// `None` by the caller so a saved-but-empty layout and no layout are the same on disk).
     pub fn save_layout(&mut self, layout: Option<&Layout>) -> Result<(), ()> {
-        let mut all = self.read_all();
-        all.layout = layout.cloned();
-        self.write_all(&all)
+        self.update(|all| all.layout = layout.cloned())
     }
 }
 

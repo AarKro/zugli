@@ -8,12 +8,12 @@
 
 use core::fmt::Write as _;
 
-use alloc::vec;
 use embassy_futures::select::{Either, select};
 use embassy_net::Stack;
 use embassy_net::dns::DnsSocket;
 use embassy_net::tcp::client::{TcpClient, TcpClientState};
 use embassy_time::{Duration, Instant, Timer, with_timeout};
+use esp_alloc::ExternalMemory;
 use heapless::{String, Vec};
 use log::{info, warn};
 use reqwless::client::{HttpClient, TlsConfig, TlsVerify};
@@ -23,14 +23,15 @@ use serde::Deserialize;
 use crate::model::{Departure, Departures, DisplayState, Selection};
 use crate::shared::{self, DISPLAY, SELECTION, SELECTION_CHANGED};
 
-// TLS record buffers and the HTTP response buffer, allocated once on the heap to keep them
-// off the task stack. The read record must hold the server's certificate (we receive but
-// don't verify it, §8-4), so it stays large; the write side and body buffer are smaller.
+// TLS record buffers and the HTTP response buffer, allocated once (in PSRAM — see `poll_task`) to
+// keep them off both scarce internal-RAM budgets: the task stack and the DMA-capable internal heap
+// WiFi needs. The read record must hold the server's certificate (we receive but don't verify it,
+// §8-4), so it stays large; the write side and body buffer are smaller.
 const TLS_READ_BUF: usize = 16 * 1024;
 const TLS_WRITE_BUF: usize = 4 * 1024;
 // We request only the five fields we actually parse (see `fetch`), which shrinks the
 // stationboard response from ~100 KiB (the full payload with real-time prognosis) to ~2 KiB.
-// 16 KiB leaves generous room for headers + body (the buffer lives in PSRAM).
+// 16 KiB leaves generous room for headers + body.
 const HTTP_BUF: usize = 16 * 1024;
 
 /// Hard ceiling on a single fetch (DNS + connect + TLS + request + body). Anything slower is
@@ -81,9 +82,18 @@ pub async fn poll_task(stack: Stack<'static>, seed: u64) {
     let tcp_client = TcpClient::new(stack, &tcp_state);
     let dns = DnsSocket::new(stack);
 
-    let mut read_record = vec![0u8; TLS_READ_BUF];
-    let mut write_record = vec![0u8; TLS_WRITE_BUF];
-    let mut http_buf = vec![0u8; HTTP_BUF];
+    // Allocate the big scratch buffers explicitly in PSRAM (`ExternalMemory`), mirroring the layout
+    // mirrors in `shared.rs`. A plain `vec![0u8; N]` would NOT land here: esp-alloc is first-fit
+    // across regions in registration order, and `main.rs` registers the internal heap before PSRAM,
+    // so `vec!` would serve these 36 KiB from the scarce internal heap — halving it and competing
+    // with WiFi's DMA allocations. `vec!` also can't take an allocator, hence the explicit
+    // `with_capacity_in` + `resize`. They deref to `&mut [u8]`, so `fetch`'s signature is unchanged.
+    let mut read_record = alloc::vec::Vec::with_capacity_in(TLS_READ_BUF, ExternalMemory);
+    read_record.resize(TLS_READ_BUF, 0u8);
+    let mut write_record = alloc::vec::Vec::with_capacity_in(TLS_WRITE_BUF, ExternalMemory);
+    write_record.resize(TLS_WRITE_BUF, 0u8);
+    let mut http_buf = alloc::vec::Vec::with_capacity_in(HTTP_BUF, ExternalMemory);
+    http_buf.resize(HTTP_BUF, 0u8);
 
     // Don't poll until DHCP has actually configured the interface — fetching before the
     // network is up just burns a failed attempt and flashes the offline screen on boot.
@@ -240,8 +250,10 @@ async fn fetch(
 /// Parse the stationboard body and build the up-to-three soonest departures the panel should
 /// show — every connection in all-connections mode, or only the user's picks otherwise.
 fn parse_departures(body: &[u8], sel: &Selection) -> Option<Departures> {
-    // Scratch space for decoding JSON `\uXXXX` escapes (e.g. `ü`); must fit the longest single
-    // unescaped string, so it tracks the largest field capacity above (`to`, now 64).
+    // Scratch space for decoding JSON `\uXXXX` escapes (e.g. `ü`). Rule (shared with
+    // `storage.rs`'s unescape scratch): this buffer must hold the longest single *decoded* field
+    // `Board` can contain. Here that's `Entry::to`, a `String<64>` destination, so 96 B leaves
+    // margin.
     let mut unescape = [0u8; 96];
     let board = match serde_json_core::from_slice_escaped::<Board>(body, &mut unescape) {
         Ok((b, _)) => b,

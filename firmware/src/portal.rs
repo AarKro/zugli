@@ -12,7 +12,6 @@
 use core::fmt::Write as _;
 
 use embassy_futures::select::{Either, select};
-use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{IpAddress, IpEndpoint, Stack};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
@@ -28,6 +27,7 @@ use picoserve::Router;
 use crate::httpd::{html, json};
 use crate::model::WifiCreds;
 use crate::storage;
+use crate::udp::UdpBuffers;
 use crate::wifi::{self, WifiDevice};
 use esp_radio::wifi::sta::StationConfig;
 use esp_radio::wifi::{AuthenticationMethod, Config as WifiConfig, WifiController};
@@ -36,6 +36,11 @@ const SETUP_HTML: &str = include_str!("../../web/setup.html");
 
 /// AP gateway / portal address.
 const AP_IP: [u8; 4] = [192, 168, 4, 1];
+
+/// TTL on the catch-all DNS answer ([`dns_task`]). Short-lived on purpose: every query gets
+/// re-answered rather than cached for long, and the portal is only up for the few minutes of
+/// setup anyway.
+const DNS_ANSWER_TTL_SECS: u32 = 60;
 
 /// One scanned network for the setup page list.
 #[derive(Clone)]
@@ -166,11 +171,8 @@ pub async fn dhcp_task(stack: Stack<'static>) {
     use edge_dhcp::server::{Server, ServerOptions};
     use edge_dhcp::{Ipv4Addr as DhcpIpv4, Options, Packet};
 
-    let mut rx_meta = [PacketMetadata::EMPTY; 8];
-    let mut tx_meta = [PacketMetadata::EMPTY; 8];
-    let mut rx_buf = [0u8; 1024];
-    let mut tx_buf = [0u8; 1024];
-    let mut sock = UdpSocket::new(stack, &mut rx_meta, &mut rx_buf, &mut tx_meta, &mut tx_buf);
+    let mut bufs = UdpBuffers::<1024, 1024, 8>::new();
+    let mut sock = bufs.socket(stack);
     if sock.bind(67).is_err() {
         warn!("dhcp: bind failed");
         return;
@@ -209,11 +211,8 @@ pub async fn dhcp_task(stack: Stack<'static>) {
 
 #[embassy_executor::task]
 pub async fn dns_task(stack: Stack<'static>) {
-    let mut rx_meta = [PacketMetadata::EMPTY; 8];
-    let mut tx_meta = [PacketMetadata::EMPTY; 8];
-    let mut rx_buf = [0u8; 512];
-    let mut tx_buf = [0u8; 512];
-    let mut sock = UdpSocket::new(stack, &mut rx_meta, &mut rx_buf, &mut tx_meta, &mut tx_buf);
+    let mut bufs = UdpBuffers::<512, 512, 8>::new();
+    let mut sock = bufs.socket(stack);
     if sock.bind(53).is_err() {
         warn!("dns: bind failed");
         return;
@@ -249,12 +248,12 @@ pub async fn dns_task(stack: Stack<'static>) {
         resp[8..12].copy_from_slice(&[0, 0, 0, 0]);
         // Question, copied verbatim.
         resp[12..qend].copy_from_slice(&query[12..qend]);
-        // Answer: name pointer → 0x0C, type A, class IN, TTL 60, rdlength 4, AP IP.
+        // Answer: name pointer → 0x0C, type A, class IN, TTL DNS_ANSWER_TTL_SECS, rdlength 4, AP IP.
         let mut p = qend;
         resp[p..p + 2].copy_from_slice(&[0xC0, 0x0C]);
         resp[p + 2..p + 4].copy_from_slice(&[0, 1]);
         resp[p + 4..p + 6].copy_from_slice(&[0, 1]);
-        resp[p + 6..p + 10].copy_from_slice(&[0, 0, 0, 60]);
+        resp[p + 6..p + 10].copy_from_slice(&DNS_ANSWER_TTL_SECS.to_be_bytes());
         resp[p + 10..p + 12].copy_from_slice(&[0, 4]);
         resp[p + 12..p + 16].copy_from_slice(&AP_IP);
         p += 16;
@@ -271,25 +270,47 @@ async fn setup_index() -> impl IntoResponse {
     Response::ok(html(SETUP_HTML))
 }
 
+/// Response buffer cap for `GET /scan`. `SCAN_CACHE` holds up to 16 networks at ~55-90 B of JSON
+/// each, so a full cache can exceed this — deliberately: rather than statically sizing for the
+/// theoretical worst case (~16 × 100 B), we keep a modest buffer and stop cleanly if the next entry
+/// won't fit (RAM budget, T2.1). The guard in [`scan_handler`] makes that always emit a well-formed
+/// array; a truncated push would otherwise cut the JSON mid-element with no closing `]`, and the
+/// setup page's `JSON.parse` would fail and show an *empty* list exactly when the most APs are up.
+const SCAN_JSON_CAP: usize = 768;
+/// Worst case for one entry built below: the fixed template (~29 B) + a 32-char SSID whose every
+/// char escapes (×2 = 64 B) + `rssi` (≤4 B, "-128") + `secure` (≤5 B, "false") + a leading comma —
+/// comfortably under this, so the per-entry temp never itself truncates.
+const SCAN_ENTRY_CAP: usize = 128;
+
 async fn scan_handler() -> impl IntoResponse {
     // Kick off a fresh background rescan (merged into the cache, never destructive), then
     // return whatever we have right now. "Scan again" picks up the new results next tap.
     RESCAN_REQ.signal(());
     let cache = SCAN_CACHE.lock().await;
-    let mut out: String<768> = String::new();
+    let mut out: String<SCAN_JSON_CAP> = String::new();
     let _ = out.push('[');
     for (i, n) in cache.iter().enumerate() {
+        // Build the entry in a temp buffer so we can commit it all-or-nothing: a partially pushed
+        // entry would corrupt the array, so we only append once we know the whole thing fits.
+        let mut entry: String<SCAN_ENTRY_CAP> = String::new();
         if i > 0 {
-            let _ = out.push(',');
+            let _ = entry.push(',');
         }
-        let _ = out.push_str("{\"ssid\":\"");
+        let _ = entry.push_str("{\"ssid\":\"");
         for c in n.ssid.chars() {
             if c == '"' || c == '\\' {
-                let _ = out.push('\\');
+                let _ = entry.push('\\');
             }
-            let _ = out.push(c);
+            let _ = entry.push(c);
         }
-        let _ = write!(out, "\",\"rssi\":{},\"secure\":{}}}", n.rssi, n.secure);
+        let _ = write!(entry, "\",\"rssi\":{},\"secure\":{}}}", n.rssi, n.secure);
+
+        // Reserve one byte for the closing `]` that always follows. If this entry won't fit, stop
+        // here — the array built so far is valid JSON and gets closed below.
+        if out.capacity() - out.len() < entry.len() + 1 {
+            break;
+        }
+        let _ = out.push_str(&entry);
     }
     let _ = out.push(']');
     Response::ok(out)
@@ -316,7 +337,7 @@ pub async fn setup_server_task(stack: Stack<'static>) {
         .route("/connecttest.txt", get(setup_index))
         .route("/scan", get(scan_handler))
         .route("/connect", post(connect_handler));
-    crate::httpd::serve(&app, "portal", stack).await
+    crate::httpd::serve(&app, "portal", stack, crate::httpd::server_buffers()).await
 }
 
 /// Create the static IPv4 config for the SoftAP (192.168.4.1/24).
