@@ -143,7 +143,7 @@
 
   /* ---------- big statement ---------- */
   .statement{text-align:center;}
-  .statement h2{font-size:clamp(30px,5.4vw,60px);font-weight:700;max-width:20ch;margin:0 auto;line-height:1.08;}
+  .statement h2{font-size:clamp(30px,5.4vw,60px);font-weight:700;max-width:30ch;margin:0 auto;line-height:1.08;}
   .statement h2 b{color:var(--accent);font-weight:700;}
   .statement p{max-width:54ch;margin:26px auto 0;color:#bdb5a9;font-size:clamp(16px,2vw,19px);}
 
@@ -193,10 +193,11 @@
     display:flex;gap:clamp(22px,3vw,44px);
     overflow-x:auto;scroll-snap-type:x mandatory;
     /* line the first card up with .wrap, then let the rest bleed off the right edge */
-    padding:8px max(20px,calc((100vw - var(--maxw))/2 + 28px)) 26px;
+    padding:8px max(28px,calc((100vw - var(--maxw))/2 + 28px)) 26px;
     scrollbar-width:thin;scrollbar-color:rgba(184,118,72,.5) transparent;
     -webkit-overflow-scrolling:touch;
   }
+  @media(max-width:480px){.hscroll{padding-left:20px;padding-right:20px;}}
   .hscroll::-webkit-scrollbar{height:8px;}
   .hscroll::-webkit-scrollbar-track{background:transparent;}
   .hscroll::-webkit-scrollbar-thumb{background:rgba(184,118,72,.45);border-radius:999px;}
@@ -261,7 +262,9 @@
   /* ---------- price finale ---------- */
   .price{background:
       radial-gradient(80% 120% at 50% -10%,rgba(184,118,72,.14),transparent 60%);}
-  .price-head{text-align:center;max-width:45ch;margin:0 auto 8px;}
+  /* sized so the h2 breaks only at its own <br> — a ch here is the 16px body ch,
+     45ch was narrow enough to strand "with" on its own line */
+  .price-head{text-align:center;max-width:640px;margin:0 auto 8px;}
   .price-head h2{font-size:clamp(30px,5vw,54px);}
   .price-head h2 b{color:var(--accent);}
   .price-sub{text-align:center;color:#bdb5a9;max-width:52ch;margin:22px auto 0;font-size:17px;}
@@ -378,9 +381,9 @@
   <div class="wrap">
     <h2 class="reveal">Real Swiss times,<br/><b>refreshed every 30 seconds.</b></h2>
     <p class="reveal">
-      Zügli polls the official <strong>transport.opendata.ch</strong> API for your stop, keeps the
-      next three departures you're tracking, and uses the real-time delayed time whenever there is
-      one. The number glowing on the shelf by your door is the number on the platform.
+      Zügli polls the official <strong>transport.opendata.ch</strong> API for your stop and keeps the
+      next three departures you're tracking. When one is running late, it counts down to the delayed
+      time, not the timetable. The number glowing on the shelf by your door is the number on the platform.
     </p>
   </div>
 </section>
@@ -393,9 +396,9 @@
     <div class="views-head">
       <canvas class="dot-label reveal" id="views-label" width="360" height="56" role="img" aria-label="live demo"></canvas>
       <h2 class="section-title reveal">Out of the box,<br/>it looks like this.</h2>
-      <p class="section-lead reveal">Two built-in views ship with the firmware, here rendering the same
-        three departures. These aren't mockups: both panels below run the exact layout the firmware
-        draws, glyph for glyph, on the real 64×64 matrix.</p>
+      <p class="section-lead reveal">Two views ship with the firmware, shown here rendering the same
+        three departures. These aren't mockups: both panels below draw the exact layout the firmware
+        puts on the real 64×64 matrix, glyph for glyph.</p>
     </div>
 
     <div class="views-grid">
@@ -430,11 +433,13 @@
 
 <!-- ============ UI BUILDER ============ -->
 <section id="builder" class="builder">
-  <div class="wrap builder-head">
-    <h2 class="section-title reveal">Design the board,<br/>dot by dot.</h2>
-    <p class="section-lead reveal">Not sold on the default? Open the visual layout builder right in your
-      browser and lay out the panel exactly how you want it, drag things around, size them, colour them,
-      and watch the real panel keep up as you go.</p>
+  <div class="wrap">
+    <div class="builder-head">
+      <h2 class="section-title reveal">Design the board,<br/>dot by dot.</h2>
+      <p class="section-lead reveal">Not sold on the default? Open the visual layout builder right in your
+        browser and lay out the panel exactly how you want it: drag things around, size them, colour them,
+        and watch the real panel keep up as you go.</p>
+    </div>
   </div>
 
   <!-- Full-bleed horizontal, snap-scrolling gallery of the phone screens. -->
@@ -503,11 +508,11 @@
     <div class="feature flip reveal section-follow">
       <div class="feat-text">
         <h3>Set up from your phone in two minutes. No app, no account.</h3>
-        <p>On first power-up Zügli opens its own <strong>Zügli-Setup</strong> hotspot. Join it,
-        pick your home WiFi, then open <strong>zugli.local</strong> and search for your stop.
-        Choose whether to follow one connection, a few, or the whole stop, hit Save, and the
-        panel switches over live, no reboot, nothing to install. Set the brightness or let it
-        auto-dim at night from the same page.</p>
+        <p>The config page is a plain website served by the board itself, so there's nothing to
+        install and nothing to sign up for. Come back to <strong>zugli.local</strong> whenever
+        you like to switch stops, change the connections you follow, or set the brightness and
+        let it auto-dim at night. Every change goes live on the panel the moment you hit Save,
+        no reboot needed.</p>
       </div>
       <div class="feat-media">
         <img class="feat-img" src="img/config.png" width="980" height="1880"
