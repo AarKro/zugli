@@ -25,6 +25,7 @@ pub mod shared;
 pub mod sntp;
 pub mod storage;
 pub mod udp;
+pub mod weather;
 pub mod wifi;
 
 /// Open SoftAP SSID shown during provisioning (PROJECT_BRIEF.md §0/§5.1).
@@ -38,6 +39,15 @@ pub const POLL_RETRY_SECS: u64 = 5;
 /// How long polling must fail *continuously* before the panel falls to the offline screen. Below
 /// this the last board stays up, so a brief hiccup never flashes "offline / reconnecting".
 pub const OFFLINE_AFTER_SECS: u64 = 60;
+/// How long a fetched weather sample counts as fresh; the Open-Meteo fetch (piggybacked on the
+/// poll loop, [`weather`]) re-runs once it lapses. Weather moves slowly — 15 min is plenty.
+pub const WEATHER_REFRESH_SECS: u64 = 15 * 60;
+/// Minimum spacing between weather fetch *attempts*, so a failing fetch doesn't re-run on every
+/// 30 s poll cycle (nor on every `POST /preview` wake) while the transport API keeps working.
+pub const WEATHER_RETRY_SECS: u64 = 60;
+/// After this long without a successful refresh the last weather sample is considered stale and
+/// the Weather element draws nothing, rather than showing an hours-old temperature as current.
+pub const WEATHER_STALE_SECS: u64 = 3 * 60 * 60;
 
 /// Leak a value into a `'static` via a `StaticCell`. Panics if called twice for one cell.
 #[macro_export]

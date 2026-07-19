@@ -556,6 +556,7 @@
         <button class="ed-chip" data-add="station"><span class="plus">+</span>Station</button>
         <button class="ed-chip" data-add="divider"><span class="plus">+</span>Divider</button>
         <button class="ed-chip" data-add="icon"><span class="plus">+</span>Icon</button>
+        <button class="ed-chip" data-add="weather"><span class="plus">+</span>Weather</button>
       </div>
       <p class="note muted hidden" id="ed-full">Layout full — remove an element to add more.</p>
       <button class="ed-clear" id="ed-clear">Clear custom layout</button>
@@ -623,6 +624,18 @@
         <span class="seg" id="seg-format">
           <button data-v="0" id="ed-f0"></button>
           <button data-v="1" id="ed-f1"></button>
+          <!-- Third option only for the Weather element's 3-way format; hidden for Clock/Date. -->
+          <button data-v="2" id="ed-f2" class="hidden"></button>
+        </span>
+      </div>
+      <div class="prow" id="pr-wstyle">
+        <span class="plabel-wrap">
+          <span class="plabel">Icon colours</span>
+          <span class="psub">Colorful uses fixed colours per condition.</span>
+        </span>
+        <span class="seg" id="seg-wstyle">
+          <button data-v="0" aria-label="Icon in the element colour">Single</button>
+          <button data-v="1" aria-label="Fixed colours per weather condition">Colorful</button>
         </span>
       </div>
       <div class="prow" id="pr-glyph">
@@ -715,6 +728,7 @@ const FONTS = {
 //       config:  { stripCity: bool, showLineBadges: bool },
 //       frame:   integer, +1 every 50 ms (drives marquee scroll),
 //       now:     Date (used for Clock/Date elements; local time),
+//       weather: { deciC: 185, code: 2 } | null (Weather element; deci-°C + WMO weather code),
 //     }
 //   grid cell = 0 (LED off) or 0xRRGGBB (lit, full strength). Later elements draw on top.
 // ===================================================================================================
@@ -753,6 +767,139 @@ const ARROW_GLYPH = [
   [0, 0, 0, 0, 0, 1, 0],
   [0, 0, 0, 0, 1, 0, 0],
 ];
+
+// Weather condition glyphs (8×7, two-tone: 0 = unlit, 1 = primary, 2 = accent), identical to
+// firmware/src/display/custom.rs. The accent cells mark the detail part (the sun behind the
+// partly-cloudy cloud, rain drops, snow flakes, the thunder bolt); the single-colour icon mode
+// draws both tones in the element colour, the colourful mode uses colorfulWeatherPalette. Keyed
+// by condition; weatherGlyph maps a WMO weather code to one of them.
+const WEATHER_GLYPHS = {
+  sun: [
+    [0, 0, 0, 1, 0, 0, 0, 0],
+    [0, 1, 0, 1, 0, 1, 0, 0],
+    [0, 0, 1, 1, 1, 0, 0, 0],
+    [1, 1, 1, 1, 1, 1, 1, 0],
+    [0, 0, 1, 1, 1, 0, 0, 0],
+    [0, 1, 0, 1, 0, 1, 0, 0],
+    [0, 0, 0, 1, 0, 0, 0, 0],
+  ],
+  partly: [
+    [0, 0, 0, 0, 0, 2, 2, 0],
+    [0, 0, 0, 0, 0, 2, 2, 2],
+    [0, 0, 1, 1, 1, 0, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 0],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+  ],
+  cloud: [
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 1, 1, 1, 0, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 0],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+  ],
+  fog: [
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 1, 1, 1, 1, 1, 1, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 1, 1, 1, 1, 1, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+  ],
+  rain: [
+    [0, 0, 1, 1, 1, 0, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 0],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 2, 0, 0, 2, 0, 0, 2],
+    [2, 0, 0, 2, 0, 0, 2, 0],
+  ],
+  snow: [
+    [0, 0, 1, 1, 1, 0, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 0],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [2, 0, 0, 2, 0, 0, 2, 0],
+    [0, 0, 2, 0, 0, 2, 0, 0],
+  ],
+  thunder: [
+    [0, 0, 1, 1, 1, 0, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 0],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 2, 2, 0, 0, 0],
+    [0, 0, 2, 2, 0, 0, 0, 0],
+    [0, 2, 2, 0, 0, 0, 0, 0],
+  ],
+};
+
+// Fixed palette for the colourful icon mode (g=1) — exact RGB from custom.rs; not customizable.
+const WEATHER_COLORFUL = {
+  sunYellow: 0xffd400,
+  cloudWhite: 0xe8e8e8,
+  cloudGray: 0x8a8a8a,
+  fogGray: 0xb4b4b4,
+  rainBlue: 0x4a90e2,
+};
+
+// The colourful mode's [primary, accent] pair for a WMO weather code — mirrors the firmware's
+// colorful_weather_palette: yellow sun; white cloud (yellow sun accent when partly cloudy); gray
+// cloud with blue rain, white snow, or a yellow bolt; gray fog. Buckets match weatherGlyph.
+function colorfulWeatherPalette(code) {
+  code |= 0;
+  const C = WEATHER_COLORFUL;
+  if (code <= 1) return [C.sunYellow, C.sunYellow];
+  if (code === 2) return [C.cloudWhite, C.sunYellow];
+  if (code === 45 || code === 48) return [C.fogGray, C.fogGray];
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return [C.cloudGray, C.rainBlue];
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return [C.cloudGray, C.cloudWhite];
+  if (code >= 95 && code <= 99) return [C.cloudGray, C.sunYellow];
+  return [C.cloudWhite, C.cloudWhite]; // overcast (3) and unknown codes
+}
+
+// Two-tone weather glyph blit: 1 cells in primary, 2 cells in accent, each as a k×k block.
+// Port of custom.rs blit_weather_glyph.
+function blitWeatherGlyph(grid, glyph, x, y, k, primary, accent) {
+  for (let gy = 0; gy < glyph.length; gy++) {
+    const row = glyph[gy];
+    for (let gx = 0; gx < row.length; gx++) {
+      const tone = row[gx];
+      if (!tone) continue;
+      const rgb = tone === 2 ? accent : primary;
+      for (let sy = 0; sy < k; sy++) for (let sx = 0; sx < k; sx++) pset(grid, x + gx * k + sx, y + gy * k + sy, rgb);
+    }
+  }
+}
+
+// Icon width (8) + 1-LED gap before the temperature — mirrors WEATHER_ICON_ADVANCE in custom.rs.
+const WEATHER_ICON_ADVANCE = 9;
+
+// WMO weather-code buckets, identical to firmware weather_condition_glyph: clear (0–1), partly
+// cloudy (2), overcast (3), fog (45/48), rain incl. drizzle/showers (51–67, 80–82), snow
+// (71–77, 85–86), thunderstorm (95–99); anything unknown reads as cloud.
+function weatherGlyph(code) {
+  code |= 0;
+  if (code <= 1) return WEATHER_GLYPHS.sun;
+  if (code === 2) return WEATHER_GLYPHS.partly;
+  if (code === 3) return WEATHER_GLYPHS.cloud;
+  if (code === 45 || code === 48) return WEATHER_GLYPHS.fog;
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return WEATHER_GLYPHS.rain;
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return WEATHER_GLYPHS.snow;
+  if (code >= 95 && code <= 99) return WEATHER_GLYPHS.thunder;
+  return WEATHER_GLYPHS.cloud;
+}
+
+// Deci-°C → whole °C, rounded half away from zero — mirrors model.rs Weather::whole_celsius.
+function weatherWholeCelsius(deciC) {
+  deciC |= 0;
+  return Math.trunc((deciC + (deciC >= 0 ? 5 : -5)) / 10);
+}
 
 const clampInt = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v) | 0;
 const fontFor = (s) => (s === 1 ? FONTS["6x10"] : FONTS["5x7"]);
@@ -933,6 +1080,33 @@ function drawIcon(grid, el) {
   }
 }
 
+// Live Weather element (t=7): current conditions at the tracked stop, per format f
+// (0 = icon + temperature, 1 = temperature only, 2 = icon only). The icon draws per its palette
+// mode g: 0 = the element colour (single tone), 1 = colourful (colorfulWeatherPalette's fixed
+// per-condition pair); the temperature always uses the element colour. No weather in the ctx →
+// draws nothing (same contract as an absent departure slot). Static text, never a marquee.
+// Port of custom.rs draw_weather.
+function drawWeather(grid, el, ctx) {
+  const w = ctx.weather;
+  if (!w) return false;
+  const k = clampInt(el.k === undefined ? 1 : el.k, 1, 3);
+  const f = el.f | 0;
+  const showIcon = f !== 1, showTemp = f !== 2;
+  if (showIcon) {
+    const rgb = elemColor(el);
+    const [primary, accent] = (el.g | 0) === 1 ? colorfulWeatherPalette(w.code) : [rgb, rgb];
+    blitWeatherGlyph(grid, weatherGlyph(w.code), el.x | 0, el.y | 0, k, primary, accent);
+  }
+  if (showTemp) {
+    const s = weatherWholeCelsius(w.deciC) + "°";
+    // The temperature reuses placeText via a shifted copy: natural width, pinned left
+    // (alignment has nothing to align against without a box).
+    const x = (el.x | 0) + (showIcon ? WEATHER_ICON_ADVANCE * k : 0);
+    placeText(grid, s, { ...el, x, w: 0, a: 0 }, false, 0);
+  }
+  return false;
+}
+
 // Render a whole custom layout to a fresh 64×64 grid. Returns { grid, animating }.
 function renderLayout(layout, ctx) {
   const grid = new Uint32Array(PANEL_COLS * PANEL_ROWS);
@@ -947,6 +1121,7 @@ function renderLayout(layout, ctx) {
       case 4: animating = drawDate(grid, el, ctx) || animating; break;
       case 5: drawDivider(grid, el); break;
       case 6: drawIcon(grid, el); break;
+      case 7: animating = drawWeather(grid, el, ctx) || animating; break;
       default: break;
     }
   }
@@ -1025,7 +1200,7 @@ window.dragToDismiss = function(sheetEl, grip, opts){
 };
 
 const MAX_CONNS = 6;         // mirrors firmware `model::MAX_CONNS`
-let selectedStop = null;     // {id, name}
+let selectedStop = null;     // {id, name, lat, lon} — lat/lon WGS84 or null when unknown
 let selectedConns = [];      // [{line, category, destination}] — the picked connections
 let allConnections = false;  // tracking mode: false = specific connections, true = whole stop
 
@@ -1075,7 +1250,12 @@ async function restoreSelection(){
     const r = await fetch("/selection");
     const s = await r.json();
     if (!s || !s.stopName) return; // nothing saved yet — leave the form blank
-    selectedStop = { id: String(s.stopId || ""), name: s.stopName };
+    selectedStop = {
+      id: String(s.stopId || ""),
+      name: s.stopName,
+      lat: typeof s.lat === "number" ? s.lat : null,
+      lon: typeof s.lon === "number" ? s.lon : null,
+    };
     $("stop").value = s.stopName;
     const all = !!s.allConnections;
     allConnections = all;
@@ -1086,13 +1266,32 @@ async function restoreSelection(){
     refreshModeThumb($("mode-track"));
     if (all){
       showSave();
+      // Saves from before coordinates existed carry none — backfill so a re-save (and the
+      // Weather element with it) picks them up.
+      if (selectedStop.lat == null) backfillStopCoords();
     } else if (selectedStop.id){
       // Re-fetch the live board and pre-select the saved lines (those still departing this stop).
+      // (loadConnections also backfills missing stop coordinates from the board's station info.)
       loadConnections(selectedStop.id, (s.connections || []).map(connKey));
     }
   } catch (_) { /* device unreachable or no selection — leave the form blank */ }
 }
 restoreSelection();
+
+// Fill in selectedStop.lat/lon from the stationboard's station info when the restored selection
+// predates coordinate capture. Best-effort: on failure the Weather element just stays data-less.
+async function backfillStopCoords(){
+  if (!selectedStop || !selectedStop.id || selectedStop.lat != null) return;
+  try {
+    const r = await fetch(`${API}/stationboard?id=${encodeURIComponent(selectedStop.id)}&limit=1`);
+    const d = await r.json();
+    const co = d && d.station && d.station.coordinate;
+    if (selectedStop && co && typeof co.x === "number" && typeof co.y === "number"){
+      selectedStop.lat = co.x;
+      selectedStop.lon = co.y;
+    }
+  } catch (_) { /* keep lat/lon unknown */ }
+}
 
 // ---------- stop autocomplete (phone → API directly, brief §6.1) ----------
 let debounce;
@@ -1129,7 +1328,11 @@ function renderResults(stations){
 function hideResults(){ $("results").classList.add("hidden"); }
 
 function chooseStop(s){
-  selectedStop = { id: String(s.id), name: s.name };
+  // The locations API ships each station's WGS84 coordinate (x = lat, y = lon); keep it on the
+  // selection so the board can fetch the weather at the stop (custom layout's Weather element).
+  const co = s.coordinate;
+  const hasCo = co && typeof co.x === "number" && typeof co.y === "number";
+  selectedStop = { id: String(s.id), name: s.name, lat: hasCo ? co.x : null, lon: hasCo ? co.y : null };
   $("stop").value = s.name;
   hideResults();
   // All-connections mode skips the per-line list and offers the save button directly.
@@ -1148,6 +1351,14 @@ async function loadConnections(stopId, preselect){
   try {
     const r = await fetch(`${API}/stationboard?id=${encodeURIComponent(stopId)}&limit=20`);
     const data = await r.json();
+    // The board's station info carries the stop's coordinate — backfill it on selections that
+    // predate coordinate capture (see backfillStopCoords), so the Weather element gets data.
+    const co = data && data.station && data.station.coordinate;
+    if (selectedStop && selectedStop.id === String(stopId) && selectedStop.lat == null
+        && co && typeof co.x === "number" && typeof co.y === "number"){
+      selectedStop.lat = co.x;
+      selectedStop.lon = co.y;
+    }
     const board = data.stationboard || [];
     const seen = new Set();
     const conns = [];
@@ -1240,6 +1451,9 @@ $("save").addEventListener("click", async () => {
     connections: allConnections ? [] : selectedConns.map(c => ({
       line: c.line, category: c.category, destination: c.destination,
     })),
+    // Stop coordinates (when known) feed the board's Open-Meteo fetch for the Weather element.
+    ...(selectedStop.lat != null && selectedStop.lon != null
+      ? { lat: selectedStop.lat, lon: selectedStop.lon } : {}),
   };
   // Abort a stalled request so the button can never get stuck showing "Saving…".
   const ctrl = new AbortController();
@@ -1390,6 +1604,7 @@ fetch("/config")
     station: "Zürich, Bahnhofstrasse",
     config: { stripCity: false, showLineBadges: true },
     now: new Date(),
+    weather: { deciC: 185, code: 2 }, // 19° partly cloudy
   };
 
   // ---------- LED dot rendering ----------
@@ -1469,7 +1684,7 @@ fetch("/config")
     const led = createLedRenderer(canvas);
     const rm = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
     let layout = { v: 1, e: [] };
-    let ctx = { deps: [], station: "", config: { stripCity: false, showLineBadges: true }, frame: 0, now: null };
+    let ctx = { deps: [], station: "", config: { stripCity: false, showLineBadges: true }, frame: 0, now: null, weather: null };
     let liveClock = true; // until setContext supplies an explicit `now`
     let wantRun = false;  // start() was called (survives a reduced-motion flip back)
     let raf = 0, last = 0, acc = 0;
@@ -1524,7 +1739,7 @@ fetch("/config")
   function renderPanelThumbnail(canvas, layout, ctx) {
     const led = createLedRenderer(canvas);
     const full = {
-      deps: [], station: "", config: { stripCity: false, showLineBadges: true }, now: new Date(),
+      deps: [], station: "", config: { stripCity: false, showLineBadges: true }, now: new Date(), weather: null,
       ...(ctx || {}),
       frame: 0,
     };
@@ -1622,7 +1837,10 @@ fetch("/config")
     el.s = clampI(el.s||0,0,1); el.k = clampI(el.k==null?1:el.k,1,3);
     el.c = clampI(el.c||0,0,2); el.a = clampI(el.a||0,0,2);
     el.di = clampI(el.di||0,0,2); el.fk = clampI(el.fk||0,0,2);
-    el.th = clampI(el.th==null?1:el.th,1,2); el.f = clampI(el.f||0,0,1); el.g = clampI(el.g||0,0,2);
+    // f is a 2-way selector everywhere except the Weather element's 3-way format; g is a 3-way
+    // glyph id on Icon but Weather's 2-way icon-palette switch (mirrors sanitize()).
+    el.th = clampI(el.th==null?1:el.th,1,2); el.f = clampI(el.f||0,0,(el.t|0)===7?2:1);
+    el.g = clampI(el.g||0,0,(el.t|0)===7?1:2);
     if (typeof el.v === "string" && el.v.length > 24) el.v = el.v.slice(0,24);
     return el;
   }
@@ -1636,6 +1854,7 @@ fetch("/config")
       case "date":    return {t:4, x:2, y:2,  s:0, k:1, c:0, a:0, f:0};
       case "divider": return {t:5, x:0, y:32, w:0, th:1, c:1};
       case "icon":    return {t:6, x:26,y:26, k:2, c:0, g:0};
+      case "weather": return {t:7, x:2, y:2,  s:0, k:1, c:0, f:0};
     }
   }
   // A Departure adds THREE t=1 fields for the next free slot, laid out like the built-in board row.
@@ -1701,6 +1920,28 @@ fetch("/config")
   const edDeps = () => window.SAMPLE_PANEL_CTX.deps;
   const edConfig = () => ({ stripCity: !!cfg.stripCity, showLineBadges: !!cfg.showLineBadges });
 
+  // Live weather for the simulator/thumbnail, fetched straight from Open-Meteo (CORS-enabled, no
+  // key — same source the firmware polls) when the selected stop has coordinates; the sample
+  // weather fills in otherwise, so the Weather element always previews meaningfully.
+  let liveWeather = null;      // { deciC, code } from the last successful fetch
+  let liveWeatherAt = 0;       // Date.now() of that fetch — refetched after ~15 min (firmware cadence)
+  const edWeather = () => liveWeather || window.SAMPLE_PANEL_CTX.weather;
+  function refreshLiveWeather(){
+    if (!selectedStop || selectedStop.lat == null || selectedStop.lon == null) return;
+    if (liveWeather && Date.now() - liveWeatherAt < 15 * 60 * 1000) return;
+    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${selectedStop.lat}&longitude=${selectedStop.lon}&current=temperature_2m,weather_code`)
+      .then(r => r.json())
+      .then(d => {
+        const c = d && d.current;
+        if (!c || typeof c.temperature_2m !== "number") return;
+        liveWeather = { deciC: Math.round(c.temperature_2m * 10), code: c.weather_code | 0 };
+        liveWeatherAt = Date.now();
+        if (editorOpen && sim) sim.setContext({ weather: edWeather() });
+        updateThumb();
+      })
+      .catch(() => {});
+  }
+
   // ---------- element metrics (mirror of the engine's text/badge/glyph sizing) ----------
   const GLYPH_DIM = [[9, 10], [3, 5], [7, 5]]; // tram, Z, arrow — w×h at k=1
   // A badge field rendering as the filled box (style f=0 with the global badges toggle on) —
@@ -1722,6 +1963,7 @@ fetch("/config")
       if (fk === 1) return stripCityName(String(dep.destination));
       return dep.minutes == null ? "--" : dep.minutes === 0 ? "now" : dep.minutes + "'";
     }
+    if (t === 7) return (el.f | 0) === 2 ? "" : weatherWholeCelsius(edWeather().deciC) + "°";
     return "";
   }
   // Bounding box in LED units, anchored at (el.x, el.y) like the firmware draws.
@@ -1743,6 +1985,14 @@ fetch("/config")
       const dep = edDeps()[clampI(el.di || 0, 0, 2)];
       if (dep && dep.minutes === 0) return { x, y, w: 9 * k, h: 10 * k }; // tram pictogram
     }
+    if (t === 7){
+      // Icon (8 wide + 1 gap when a temperature follows) plus the temperature's text metrics.
+      const showIcon = (el.f | 0) !== 1, showTemp = (el.f | 0) !== 2;
+      const adv7 = (el.s | 0) === 1 ? 6 : 5, fh7 = (el.s | 0) === 1 ? 10 : 7;
+      const iconW = showIcon ? (showTemp ? 9 : 8) * k : 0;
+      const textW = showTemp ? cpLen(elementText(el)) * adv7 * k : 0;
+      return { x, y, w: Math.max(1, iconW + textW), h: Math.max(showIcon ? 7 * k : 0, showTemp ? fh7 * k : 1) };
+    }
     const adv = (el.s | 0) === 1 ? 6 : 5, fh = (el.s | 0) === 1 ? 10 : 7;
     const natural = Math.max(1, cpLen(elementText(el))) * adv * k;
     const w = (el.w | 0) > 0 ? (el.w | 0) : natural;
@@ -1763,7 +2013,7 @@ fetch("/config")
     for (let di = 0; di < 3; di++) if (!used.has(di)) return di;
     return -1;
   }
-  const TYPE_NAMES = ["Text", "Departure", "Station", "Clock", "Date", "Divider", "Icon"];
+  const TYPE_NAMES = ["Text", "Departure", "Station", "Clock", "Date", "Divider", "Icon", "Weather"];
   const FK_NAMES = ["Badge", "Direction", "Time"];
   const elName = (el) => (el.t | 0) === 1
     ? `Departure ${(el.di | 0) + 1} · ${FK_NAMES[el.fk | 0]}`
@@ -1772,7 +2022,7 @@ fetch("/config")
   // ---------- main page: thumbnail + entry card + mode selector ----------
   function updateThumb(){
     renderPanelThumbnail($("entry-thumb"), savedLayout,
-      { ...window.SAMPLE_PANEL_CTX, station: edStation(), config: edConfig(), now: new Date() });
+      { ...window.SAMPLE_PANEL_CTX, station: edStation(), config: edConfig(), now: new Date(), weather: edWeather() });
     $("entry-sub").textContent = savedLayout.e.length ? "Custom layout" : "No custom layout yet";
   }
 
@@ -1808,8 +2058,9 @@ fetch("/config")
     $("ui-status").classList.add("hidden");
     hideEdStatus();
     if (!sim) sim = createPanelSim($("ed-canvas"));
-    sim.setContext({ deps: edDeps(), station: edStation(), config: edConfig() });
+    sim.setContext({ deps: edDeps(), station: edStation(), config: edConfig(), weather: edWeather() });
     sim.start();
+    refreshLiveWeather(); // swaps the sample weather for the stop's real conditions when it lands
     driver.open();
     refreshAll();
     // The persisted layout may have changed under us (another phone) — refresh in the
@@ -1963,16 +2214,26 @@ fetch("/config")
     show("pr-bstyle", badge); if (badge) segMark("seg-bstyle", (el.f | 0) === 1 ? 1 : 0);
     const boxed = isBoxBadge(el);
     show("pr-align", textLike && !boxed); if (textLike && !boxed) segMark("seg-align", el.a | 0);
-    show("pr-font", textLike && !boxed); if (textLike && !boxed) segMark("seg-font", el.s | 0);
-    const scales = textLike || t === 6;
+    // Weather shows a temperature in the regular fonts too — unless it's icon-only (f=2).
+    const hasFont = (textLike && !boxed) || (t === 7 && (el.f | 0) !== 2);
+    show("pr-font", hasFont); if (hasFont) segMark("seg-font", el.s | 0);
+    const scales = textLike || t === 6 || t === 7;
     show("pr-scale", scales); if (scales) segMark("seg-scale", clampI(el.k == null ? 1 : el.k, 1, 3));
-    show("pr-format", t === 3 || t === 4);
+    show("pr-format", t === 3 || t === 4 || t === 7);
+    $("ed-f2").classList.toggle("hidden", t !== 7); // third format only exists for Weather
     if (t === 3){ $("ed-f0").textContent = "09:05"; $("ed-f1").textContent = "9:05"; segMark("seg-format", el.f | 0); }
     if (t === 4){
       const d = new Date(), short = `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.`;
       $("ed-f0").textContent = short; $("ed-f1").textContent = short + d.getFullYear();
       segMark("seg-format", el.f | 0);
     }
+    if (t === 7){
+      $("ed-f0").textContent = "Icon + temp"; $("ed-f1").textContent = "Temp"; $("ed-f2").textContent = "Icon";
+      segMark("seg-format", el.f | 0);
+    }
+    // Weather icon palette: only meaningful while the icon is shown (any format but temp-only).
+    const wstyle = t === 7 && (el.f | 0) !== 1;
+    show("pr-wstyle", wstyle); if (wstyle) segMark("seg-wstyle", (el.g | 0) === 1 ? 1 : 0);
     show("pr-glyph", t === 6); if (t === 6) segMark("seg-glyph", el.g | 0);
     show("pr-th", t === 5); if (t === 5) segMark("seg-th", clampI(el.th == null ? 1 : el.th, 1, 2));
     $("ed-x").value = el.x | 0;
@@ -2019,6 +2280,7 @@ fetch("/config")
   bindSeg("seg-format", (el, v) => { el.f = v; });
   bindSeg("seg-bstyle", (el, v) => { el.f = v; });
   bindSeg("seg-glyph", (el, v) => { el.g = v; });
+  bindSeg("seg-wstyle", (el, v) => { el.g = v; });
   bindSeg("seg-th", (el, v) => { el.th = v; });
 
   document.querySelectorAll(".sw[data-c]").forEach(b => {

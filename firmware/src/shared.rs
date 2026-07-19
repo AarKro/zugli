@@ -14,7 +14,7 @@ use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant};
 
-use crate::model::{Config, DisplayState, Layout, Selection, UiMode};
+use crate::model::{Config, DisplayState, Layout, Selection, UiMode, Weather};
 
 /// Latest thing to show on the panel. The render task waits on this and redraws on change.
 pub static DISPLAY: Signal<CriticalSectionRawMutex, DisplayState> = Signal::new();
@@ -160,6 +160,80 @@ pub fn preview_deadline() -> Option<Instant> {
         0 => None,
         dl => Some(Instant::from_ticks(dl)),
     }
+}
+
+// --- Current weather (custom layout's Weather element, crate::weather) ---------------------------
+
+/// Live mirror of the last fetched [`Weather`], packed into one atomic so the render task reads it
+/// without blocking (like the config scalars above): bit 31 = sample present, bits 16..24 = WMO
+/// code, bits 0..16 = the deci-°C temperature as `i16` bits. `0` = nothing fetched yet.
+static WEATHER: AtomicU32 = AtomicU32::new(0);
+const WEATHER_PRESENT: u32 = 1 << 31;
+
+/// When the mirrored weather sample was fetched, as raw [`Instant`] ticks (`0` = never). Freshness
+/// and staleness are both derived from this, so a failed refresh ages the sample out naturally.
+static WEATHER_FETCHED: AtomicU64 = AtomicU64::new(0);
+
+/// Publish a freshly fetched weather sample and wake the render task so a Weather element on a
+/// static custom screen repaints now rather than on the next poll-driven state change.
+pub fn set_weather(w: Weather) {
+    let packed = WEATHER_PRESENT | ((w.code as u32) << 16) | (w.deci_celsius as u16 as u32);
+    WEATHER.store(packed, Ordering::Relaxed);
+    // `.max(1)` keeps a boot-instant fetch distinguishable from the "never fetched" 0.
+    WEATHER_FETCHED.store(Instant::now().as_ticks().max(1), Ordering::Relaxed);
+    REDRAW.signal(());
+}
+
+/// Age of the mirrored weather sample, or `None` if nothing was ever fetched.
+fn weather_age() -> Option<Duration> {
+    match WEATHER_FETCHED.load(Ordering::Relaxed) {
+        0 => None,
+        t => Some(Instant::now().duration_since(Instant::from_ticks(t))),
+    }
+}
+
+/// The current weather for the render task, or `None` when nothing has been fetched yet or the
+/// last sample is older than [`crate::WEATHER_STALE_SECS`] (the Weather element then draws
+/// nothing, per the same missing-live-data contract as an absent departure slot).
+pub fn weather() -> Option<Weather> {
+    let packed = WEATHER.load(Ordering::Relaxed);
+    if packed & WEATHER_PRESENT == 0 {
+        return None;
+    }
+    if weather_age()? > Duration::from_secs(crate::WEATHER_STALE_SECS) {
+        return None;
+    }
+    Some(Weather {
+        deci_celsius: (packed & 0xFFFF) as u16 as i16,
+        code: ((packed >> 16) & 0xFF) as u8,
+    })
+}
+
+/// Whether the mirrored sample is recent enough that no refresh is due
+/// ([`crate::WEATHER_REFRESH_SECS`]).
+pub fn weather_is_fresh() -> bool {
+    WEATHER.load(Ordering::Relaxed) & WEATHER_PRESENT != 0
+        && weather_age().is_some_and(|age| age < Duration::from_secs(crate::WEATHER_REFRESH_SECS))
+}
+
+/// Whether a Weather element is in a layout the panel can currently be showing: in the active live
+/// preview, or in the persisted custom layout while the Custom view is selected. Gates the
+/// Open-Meteo fetch so
+/// boards without the widget never poll weather. Checks inside the layout mutexes **without
+/// cloning** — the poll task calls this every cycle and a ~1 KB `Layout` clone would lean on its
+/// already-tight stack for a yes/no answer.
+pub fn weather_element_active() -> bool {
+    if preview_active()
+        && PREVIEW_LAYOUT.lock(|cell| {
+            cell.borrow().as_deref().is_some_and(Layout::has_weather_element)
+        })
+    {
+        return true;
+    }
+    ui_mode() == UiMode::Custom
+        && CUSTOM_LAYOUT.lock(|cell| {
+            cell.borrow().as_deref().is_some_and(Layout::has_weather_element)
+        })
 }
 
 /// Whether the panel should drop the "City, " prefix from stop/destination names.

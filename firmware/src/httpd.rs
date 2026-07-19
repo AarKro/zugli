@@ -287,7 +287,16 @@ fn warn_low_heap(tag: &str) {
 async fn set_preview(Json(mut layout): Json<Layout>) -> impl IntoResponse {
     layout.sanitize();
     warn_low_heap("preview");
+    // A preview that shows a Weather element may need data the poll loop has never fetched (the
+    // Open-Meteo fetch is gated on a live weather element). Wake it once so the panel fills in
+    // promptly instead of on the next 30 s cycle; `weather_is_fresh` (plus the fetch's own retry
+    // pacing) keeps the editor's high-frequency preview pushes from turning this into a re-poll
+    // storm.
+    let wake_weather = layout.has_weather_element() && !shared::weather_is_fresh();
     shared::set_preview(layout);
+    if wake_weather {
+        SELECTION_CHANGED.signal(());
+    }
     Response::ok(ok())
 }
 
