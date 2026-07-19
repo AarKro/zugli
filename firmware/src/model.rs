@@ -264,7 +264,9 @@ pub struct Element {
     /// (type 1, fk=0): 0 = filled badge box, 1 = minimal (line label only, no box).
     #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub f: u8,
-    /// Icon glyph id (type 6 only): 0 = tram-front, 1 = Z-blind, 2 = arrow.
+    /// Icon glyph id (type 6): 0 = tram-front, 1 = Z-blind, 2 = arrow. Icon palette for Weather
+    /// (type 7): 0 = the element colour (single tone), 1 = colourful (fixed per-condition
+    /// colours — yellow sun, white/gray clouds — not customizable).
     #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub g: u8,
 }
@@ -287,8 +289,10 @@ impl Layout {
             el.di = el.di.min(2);
             el.fk = el.fk.min(2);
             el.th = el.th.clamp(1, 2);
-            // `f` is a 2-way selector everywhere except the Weather element's 3-way format.
+            // `f` is a 2-way selector everywhere except the Weather element's 3-way format;
+            // `g` is a 3-way glyph id on Icon but Weather's 2-way icon-palette switch.
             el.f = el.f.min(if el.t == 7 { 2 } else { 1 });
+            el.g = el.g.min(if el.t == 7 { 1 } else { 2 });
             if let Some(rgb) = el.col {
                 el.col = Some(rgb & 0x00FF_FFFF);
             }

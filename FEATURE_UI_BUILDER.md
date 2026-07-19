@@ -399,7 +399,7 @@ All elements share `t` (type), `x`, `y`. Other fields are type-specific and defa
 | `4` | **Date** (live) | `s`, `k`, `c`, `a`, `f` (format) | as Clock |
 | `5` | **Divider** (rule) | `w` (length), `th` (thickness 1–2), `c` | `rule` / `Line` |
 | `6` | **Icon** | `k` (scale 1–3), `c`, `g` (glyph id: 0=tram-front,1=Z-blind,2=arrow) | `draw_train_front` / glyph blitter |
-| `7` | **Weather** (live) | `s`, `k`, `c`/`col`, `f` (format 0=icon+temperature, 1=temperature only, 2=icon only) | condition glyph blitter + `place_text` of `N°` |
+| `7` | **Weather** (live) | `s`, `k`, `c`/`col`, `f` (format 0=icon+temperature, 1=temperature only, 2=icon only), `g` (icon palette 0=element colour, 1=colourful fixed per-condition colours) | condition glyph blitter + `place_text` of `N°` |
 
 Notes:
 - **Departure field (`t=1`) — the group model.** A **Departure** is three `t=1` elements
@@ -442,10 +442,15 @@ Notes:
   **only while a live layout/preview actually contains a Weather element**. Coordinates come from
   the stop selection — the config page captures the locations API's WGS84 `coordinate` into new
   optional `Selection.lat`/`lon` fields (older saves without them draw nothing until re-saved).
-  The WMO `weather_code` maps to one of seven 8×7 condition glyphs (clear / partly cloudy /
-  overcast / fog / rain / snow / thunder), mirrored pixel-for-pixel in the JS simulator; the
-  temperature renders as whole °C (`19°`). No sample yet, or a sample older than ~3 h, draws
-  nothing — the same missing-live-data contract as an absent departure slot (§9).
+  The WMO `weather_code` maps to one of seven two-tone 8×7 condition glyphs (clear / partly
+  cloudy / overcast / fog / rain / snow / thunder), mirrored pixel-for-pixel in the JS simulator;
+  the temperature renders as whole °C (`19°`). The icon has two palette modes (`g`): **single**
+  (default) draws it in the element colour — preset or custom picker, like any element — while
+  **colourful** uses a fixed, non-customizable per-condition palette (yellow sun; white cloud,
+  with a yellow sun accent when partly cloudy; gray cloud with blue rain, white snow, or a yellow
+  bolt; gray fog). The temperature always follows the element colour. No sample yet, or a sample
+  older than ~3 h, draws nothing — the same missing-live-data contract as an absent departure
+  slot (§9).
 
 ### 5.5 Bounds & validation (enforced on **both** phone and firmware)
 - **`LAYOUT_MAX_BYTES` — the authoritative flash bound (recommend 1536).** A layout is valid

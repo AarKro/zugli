@@ -628,6 +628,16 @@
           <button data-v="2" id="ed-f2" class="hidden"></button>
         </span>
       </div>
+      <div class="prow" id="pr-wstyle">
+        <span class="plabel-wrap">
+          <span class="plabel">Icon colours</span>
+          <span class="psub">Colorful uses fixed colours per condition.</span>
+        </span>
+        <span class="seg" id="seg-wstyle">
+          <button data-v="0" aria-label="Icon in the element colour">Single</button>
+          <button data-v="1" aria-label="Fixed colours per weather condition">Colorful</button>
+        </span>
+      </div>
       <div class="prow" id="pr-glyph">
         <span class="plabel">Symbol</span>
         <span class="seg" id="seg-glyph">
@@ -758,8 +768,11 @@ const ARROW_GLYPH = [
   [0, 0, 0, 0, 1, 0, 0],
 ];
 
-// Weather condition glyphs (8×7), identical to firmware/src/display/custom.rs. Keyed by
-// condition; weatherGlyph maps a WMO weather code to one of them.
+// Weather condition glyphs (8×7, two-tone: 0 = unlit, 1 = primary, 2 = accent), identical to
+// firmware/src/display/custom.rs. The accent cells mark the detail part (the sun behind the
+// partly-cloudy cloud, rain drops, snow flakes, the thunder bolt); the single-colour icon mode
+// draws both tones in the element colour, the colourful mode uses colorfulWeatherPalette. Keyed
+// by condition; weatherGlyph maps a WMO weather code to one of them.
 const WEATHER_GLYPHS = {
   sun: [
     [0, 0, 0, 1, 0, 0, 0, 0],
@@ -771,8 +784,8 @@ const WEATHER_GLYPHS = {
     [0, 0, 0, 1, 0, 0, 0, 0],
   ],
   partly: [
-    [0, 0, 0, 0, 0, 1, 1, 0],
-    [0, 0, 0, 0, 0, 1, 1, 1],
+    [0, 0, 0, 0, 0, 2, 2, 0],
+    [0, 0, 0, 0, 0, 2, 2, 2],
     [0, 0, 1, 1, 1, 0, 0, 0],
     [0, 1, 1, 1, 1, 1, 1, 0],
     [1, 1, 1, 1, 1, 1, 1, 1],
@@ -803,8 +816,8 @@ const WEATHER_GLYPHS = {
     [1, 1, 1, 1, 1, 1, 1, 1],
     [1, 1, 1, 1, 1, 1, 1, 1],
     [0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 1, 0, 0, 1, 0, 0, 1],
-    [1, 0, 0, 1, 0, 0, 1, 0],
+    [0, 2, 0, 0, 2, 0, 0, 2],
+    [2, 0, 0, 2, 0, 0, 2, 0],
   ],
   snow: [
     [0, 0, 1, 1, 1, 0, 0, 0],
@@ -812,19 +825,57 @@ const WEATHER_GLYPHS = {
     [1, 1, 1, 1, 1, 1, 1, 1],
     [1, 1, 1, 1, 1, 1, 1, 1],
     [0, 0, 0, 0, 0, 0, 0, 0],
-    [1, 0, 0, 1, 0, 0, 1, 0],
-    [0, 0, 1, 0, 0, 1, 0, 0],
+    [2, 0, 0, 2, 0, 0, 2, 0],
+    [0, 0, 2, 0, 0, 2, 0, 0],
   ],
   thunder: [
     [0, 0, 1, 1, 1, 0, 0, 0],
     [0, 1, 1, 1, 1, 1, 1, 0],
     [1, 1, 1, 1, 1, 1, 1, 1],
     [1, 1, 1, 1, 1, 1, 1, 1],
-    [0, 0, 0, 1, 1, 0, 0, 0],
-    [0, 0, 1, 1, 0, 0, 0, 0],
-    [0, 1, 1, 0, 0, 0, 0, 0],
+    [0, 0, 0, 2, 2, 0, 0, 0],
+    [0, 0, 2, 2, 0, 0, 0, 0],
+    [0, 2, 2, 0, 0, 0, 0, 0],
   ],
 };
+
+// Fixed palette for the colourful icon mode (g=1) — exact RGB from custom.rs; not customizable.
+const WEATHER_COLORFUL = {
+  sunYellow: 0xffd400,
+  cloudWhite: 0xe8e8e8,
+  cloudGray: 0x8a8a8a,
+  fogGray: 0xb4b4b4,
+  rainBlue: 0x4a90e2,
+};
+
+// The colourful mode's [primary, accent] pair for a WMO weather code — mirrors the firmware's
+// colorful_weather_palette: yellow sun; white cloud (yellow sun accent when partly cloudy); gray
+// cloud with blue rain, white snow, or a yellow bolt; gray fog. Buckets match weatherGlyph.
+function colorfulWeatherPalette(code) {
+  code |= 0;
+  const C = WEATHER_COLORFUL;
+  if (code <= 1) return [C.sunYellow, C.sunYellow];
+  if (code === 2) return [C.cloudWhite, C.sunYellow];
+  if (code === 45 || code === 48) return [C.fogGray, C.fogGray];
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return [C.cloudGray, C.rainBlue];
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return [C.cloudGray, C.cloudWhite];
+  if (code >= 95 && code <= 99) return [C.cloudGray, C.sunYellow];
+  return [C.cloudWhite, C.cloudWhite]; // overcast (3) and unknown codes
+}
+
+// Two-tone weather glyph blit: 1 cells in primary, 2 cells in accent, each as a k×k block.
+// Port of custom.rs blit_weather_glyph.
+function blitWeatherGlyph(grid, glyph, x, y, k, primary, accent) {
+  for (let gy = 0; gy < glyph.length; gy++) {
+    const row = glyph[gy];
+    for (let gx = 0; gx < row.length; gx++) {
+      const tone = row[gx];
+      if (!tone) continue;
+      const rgb = tone === 2 ? accent : primary;
+      for (let sy = 0; sy < k; sy++) for (let sx = 0; sx < k; sx++) pset(grid, x + gx * k + sx, y + gy * k + sy, rgb);
+    }
+  }
+}
 
 // Icon width (8) + 1-LED gap before the temperature — mirrors WEATHER_ICON_ADVANCE in custom.rs.
 const WEATHER_ICON_ADVANCE = 9;
@@ -1030,16 +1081,22 @@ function drawIcon(grid, el) {
 }
 
 // Live Weather element (t=7): current conditions at the tracked stop, per format f
-// (0 = icon + temperature, 1 = temperature only, 2 = icon only). No weather in the ctx → draws
-// nothing (same contract as an absent departure slot). Static text, never a marquee. Port of
-// custom.rs draw_weather.
+// (0 = icon + temperature, 1 = temperature only, 2 = icon only). The icon draws per its palette
+// mode g: 0 = the element colour (single tone), 1 = colourful (colorfulWeatherPalette's fixed
+// per-condition pair); the temperature always uses the element colour. No weather in the ctx →
+// draws nothing (same contract as an absent departure slot). Static text, never a marquee.
+// Port of custom.rs draw_weather.
 function drawWeather(grid, el, ctx) {
   const w = ctx.weather;
   if (!w) return false;
   const k = clampInt(el.k === undefined ? 1 : el.k, 1, 3);
   const f = el.f | 0;
   const showIcon = f !== 1, showTemp = f !== 2;
-  if (showIcon) blitBitmap(grid, weatherGlyph(w.code), el.x | 0, el.y | 0, k, elemColor(el));
+  if (showIcon) {
+    const rgb = elemColor(el);
+    const [primary, accent] = (el.g | 0) === 1 ? colorfulWeatherPalette(w.code) : [rgb, rgb];
+    blitWeatherGlyph(grid, weatherGlyph(w.code), el.x | 0, el.y | 0, k, primary, accent);
+  }
   if (showTemp) {
     const s = weatherWholeCelsius(w.deciC) + "°";
     // The temperature reuses placeText via a shifted copy: natural width, pinned left
@@ -1780,8 +1837,10 @@ fetch("/config")
     el.s = clampI(el.s||0,0,1); el.k = clampI(el.k==null?1:el.k,1,3);
     el.c = clampI(el.c||0,0,2); el.a = clampI(el.a||0,0,2);
     el.di = clampI(el.di||0,0,2); el.fk = clampI(el.fk||0,0,2);
-    // f is a 2-way selector everywhere except the Weather element's 3-way format (mirrors sanitize()).
-    el.th = clampI(el.th==null?1:el.th,1,2); el.f = clampI(el.f||0,0,(el.t|0)===7?2:1); el.g = clampI(el.g||0,0,2);
+    // f is a 2-way selector everywhere except the Weather element's 3-way format; g is a 3-way
+    // glyph id on Icon but Weather's 2-way icon-palette switch (mirrors sanitize()).
+    el.th = clampI(el.th==null?1:el.th,1,2); el.f = clampI(el.f||0,0,(el.t|0)===7?2:1);
+    el.g = clampI(el.g||0,0,(el.t|0)===7?1:2);
     if (typeof el.v === "string" && el.v.length > 24) el.v = el.v.slice(0,24);
     return el;
   }
@@ -2172,6 +2231,9 @@ fetch("/config")
       $("ed-f0").textContent = "Icon + temp"; $("ed-f1").textContent = "Temp"; $("ed-f2").textContent = "Icon";
       segMark("seg-format", el.f | 0);
     }
+    // Weather icon palette: only meaningful while the icon is shown (any format but temp-only).
+    const wstyle = t === 7 && (el.f | 0) !== 1;
+    show("pr-wstyle", wstyle); if (wstyle) segMark("seg-wstyle", (el.g | 0) === 1 ? 1 : 0);
     show("pr-glyph", t === 6); if (t === 6) segMark("seg-glyph", el.g | 0);
     show("pr-th", t === 5); if (t === 5) segMark("seg-th", clampI(el.th == null ? 1 : el.th, 1, 2));
     $("ed-x").value = el.x | 0;
@@ -2218,6 +2280,7 @@ fetch("/config")
   bindSeg("seg-format", (el, v) => { el.f = v; });
   bindSeg("seg-bstyle", (el, v) => { el.f = v; });
   bindSeg("seg-glyph", (el, v) => { el.g = v; });
+  bindSeg("seg-wstyle", (el, v) => { el.g = v; });
   bindSeg("seg-th", (el, v) => { el.th = v; });
 
   document.querySelectorAll(".sw[data-c]").forEach(b => {

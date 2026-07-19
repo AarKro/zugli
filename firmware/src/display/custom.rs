@@ -266,9 +266,13 @@ fn draw_divider(fb: &mut FBType, el: &Element) {
     fill_rect(fb, el.x as i32, el.y as i32, len, th, elem_color(el));
 }
 
-// Weather condition glyphs (8×7, row-major, 1 = lit), one per bucket of WMO weather codes —
-// picked by [`weather_condition_glyph`]. The JS simulator carries identical bitmaps
-// (`WEATHER_GLYPHS` in index.html) so the preview matches the panel pixel-for-pixel.
+// Weather condition glyphs (8×7, row-major, two-tone: 0 = unlit, 1 = primary, 2 = accent),
+// one per bucket of WMO weather codes — picked by [`weather_condition_glyph`]. The accent cells
+// mark the detail part of a condition (the sun behind the partly-cloudy cloud, rain drops, snow
+// flakes, the thunder bolt); in the single-colour icon mode both tones draw in the element
+// colour, in the colourful mode they take the fixed [`colorful_weather_palette`] pair. The JS
+// simulator carries identical bitmaps (`WEATHER_GLYPHS` in index.html) so the preview matches
+// the panel pixel-for-pixel.
 const SUN_GLYPH: [[u8; 8]; 7] = [
     [0, 0, 0, 1, 0, 0, 0, 0],
     [0, 1, 0, 1, 0, 1, 0, 0],
@@ -279,8 +283,8 @@ const SUN_GLYPH: [[u8; 8]; 7] = [
     [0, 0, 0, 1, 0, 0, 0, 0],
 ];
 const PARTLY_CLOUDY_GLYPH: [[u8; 8]; 7] = [
-    [0, 0, 0, 0, 0, 1, 1, 0],
-    [0, 0, 0, 0, 0, 1, 1, 1],
+    [0, 0, 0, 0, 0, 2, 2, 0],
+    [0, 0, 0, 0, 0, 2, 2, 2],
     [0, 0, 1, 1, 1, 0, 0, 0],
     [0, 1, 1, 1, 1, 1, 1, 0],
     [1, 1, 1, 1, 1, 1, 1, 1],
@@ -311,8 +315,8 @@ const RAIN_GLYPH: [[u8; 8]; 7] = [
     [1, 1, 1, 1, 1, 1, 1, 1],
     [1, 1, 1, 1, 1, 1, 1, 1],
     [0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 1, 0, 0, 1, 0, 0, 1],
-    [1, 0, 0, 1, 0, 0, 1, 0],
+    [0, 2, 0, 0, 2, 0, 0, 2],
+    [2, 0, 0, 2, 0, 0, 2, 0],
 ];
 const SNOW_GLYPH: [[u8; 8]; 7] = [
     [0, 0, 1, 1, 1, 0, 0, 0],
@@ -320,22 +324,71 @@ const SNOW_GLYPH: [[u8; 8]; 7] = [
     [1, 1, 1, 1, 1, 1, 1, 1],
     [1, 1, 1, 1, 1, 1, 1, 1],
     [0, 0, 0, 0, 0, 0, 0, 0],
-    [1, 0, 0, 1, 0, 0, 1, 0],
-    [0, 0, 1, 0, 0, 1, 0, 0],
+    [2, 0, 0, 2, 0, 0, 2, 0],
+    [0, 0, 2, 0, 0, 2, 0, 0],
 ];
 const THUNDER_GLYPH: [[u8; 8]; 7] = [
     [0, 0, 1, 1, 1, 0, 0, 0],
     [0, 1, 1, 1, 1, 1, 1, 0],
     [1, 1, 1, 1, 1, 1, 1, 1],
     [1, 1, 1, 1, 1, 1, 1, 1],
-    [0, 0, 0, 1, 1, 0, 0, 0],
-    [0, 0, 1, 1, 0, 0, 0, 0],
-    [0, 1, 1, 0, 0, 0, 0, 0],
+    [0, 0, 0, 2, 2, 0, 0, 0],
+    [0, 0, 2, 2, 0, 0, 0, 0],
+    [0, 2, 2, 0, 0, 0, 0, 0],
 ];
 
 /// Horizontal advance from a weather icon to the temperature next to it, in unscaled LEDs
 /// (the 8-column glyph plus a 1-LED gap). The editor's `measureEl` mirrors this.
 const WEATHER_ICON_ADVANCE: u8 = 9;
+
+// Fixed palette for the colourful icon mode (`g=1`), mirrored exactly by the JS simulator
+// (`WEATHER_COLORFUL` in index.html). Whites/blues wash toward white on the HUB75 panel (the
+// gamut caveat on the brand palette above), which is fine here — clouds and snow *should* read
+// white; the sun and the thunder bolt stay red-weighted enough to hold their yellow.
+const WEATHER_SUN_YELLOW: Color = Color::new(0xFF, 0xD4, 0x00);
+const WEATHER_CLOUD_WHITE: Color = Color::new(0xE8, 0xE8, 0xE8);
+const WEATHER_CLOUD_GRAY: Color = Color::new(0x8A, 0x8A, 0x8A);
+const WEATHER_FOG_GRAY: Color = Color::new(0xB4, 0xB4, 0xB4);
+const WEATHER_RAIN_BLUE: Color = Color::new(0x4A, 0x90, 0xE2);
+
+/// The colourful mode's `(primary, accent)` pair for a WMO weather code — the two tones of the
+/// condition glyph: yellow sun; white cloud (yellow sun accent when partly cloudy); gray cloud
+/// with blue rain, white snow, or a yellow bolt; gray fog. Buckets match
+/// [`weather_condition_glyph`].
+fn colorful_weather_palette(code: u8) -> (Color, Color) {
+    match code {
+        0 | 1 => (WEATHER_SUN_YELLOW, WEATHER_SUN_YELLOW),
+        2 => (WEATHER_CLOUD_WHITE, WEATHER_SUN_YELLOW),
+        45 | 48 => (WEATHER_FOG_GRAY, WEATHER_FOG_GRAY),
+        51..=67 | 80..=82 => (WEATHER_CLOUD_GRAY, WEATHER_RAIN_BLUE),
+        71..=77 | 85 | 86 => (WEATHER_CLOUD_GRAY, WEATHER_CLOUD_WHITE),
+        95..=99 => (WEATHER_CLOUD_GRAY, WEATHER_SUN_YELLOW),
+        _ => (WEATHER_CLOUD_WHITE, WEATHER_CLOUD_WHITE), // overcast (3) and unknown codes
+    }
+}
+
+/// Blit a two-tone weather glyph with its top-left at `(x, y)`, each cell drawn as a `k×k` block:
+/// `1` cells in `primary`, `2` cells in `accent` (see the glyph comment above). The single-colour
+/// icon mode simply passes the same colour twice.
+fn blit_weather_glyph(
+    fb: &mut FBType,
+    glyph: &[[u8; 8]; 7],
+    x: i32,
+    y: i32,
+    k: i32,
+    primary: Color,
+    accent: Color,
+) {
+    let no_clip = i32::MIN..i32::MAX; // pset already clips to the panel
+    for (gy, row) in glyph.iter().enumerate() {
+        for (gx, &tone) in row.iter().enumerate() {
+            if tone != 0 {
+                let color = if tone == 2 { accent } else { primary };
+                blit_cell(fb, x + gx as i32 * k, y + gy as i32 * k, k, color, &no_clip);
+            }
+        }
+    }
+}
 
 /// The condition glyph for a WMO weather interpretation code (Open-Meteo `weather_code`):
 /// clear (0–1), partly cloudy (2), overcast (3), fog (45/48), rain incl. drizzle and showers
@@ -354,9 +407,12 @@ fn weather_condition_glyph(code: u8) -> &'static [[u8; 8]; 7] {
 }
 
 /// Weather element (`t=7`): the current conditions at the tracked stop, per its format `f`
-/// (0 = icon + temperature, 1 = temperature only, 2 = icon only). Draws nothing until the
-/// Open-Meteo fetch has a fresh-enough sample ([`crate::shared::weather`]) — the same
-/// missing-live-data contract as an absent departure slot. Static text, never a marquee.
+/// (0 = icon + temperature, 1 = temperature only, 2 = icon only). The icon draws per its
+/// palette mode `g`: 0 = the element colour (single tone, custom-colourable like any element),
+/// 1 = colourful ([`colorful_weather_palette`]'s fixed per-condition pair); the temperature
+/// always uses the element colour. Draws nothing until the Open-Meteo fetch has a fresh-enough
+/// sample ([`crate::shared::weather`]) — the same missing-live-data contract as an absent
+/// departure slot. Static text, never a marquee.
 fn draw_weather(fb: &mut FBType, el: &Element) -> bool {
     let Some(w) = crate::shared::weather() else {
         return false;
@@ -365,8 +421,14 @@ fn draw_weather(fb: &mut FBType, el: &Element) -> bool {
     let show_icon = el.f != 1;
     let show_temp = el.f != 2;
     if show_icon {
+        let (primary, accent) = if el.g == 1 {
+            colorful_weather_palette(w.code)
+        } else {
+            let c = elem_color(el);
+            (c, c)
+        };
         let glyph = weather_condition_glyph(w.code);
-        blit_bitmap(fb, glyph, el.x as i32, el.y as i32, k, elem_color(el));
+        blit_weather_glyph(fb, glyph, el.x as i32, el.y as i32, k, primary, accent);
     }
     if show_temp {
         let mut s: String<8> = String::new();
