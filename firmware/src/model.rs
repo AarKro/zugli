@@ -250,7 +250,8 @@ pub struct Element {
     /// Divider thickness, 1..=2 (type 5 only).
     #[serde(default = "one_u8", skip_serializing_if = "is_one_u8")]
     pub th: u8,
-    /// Format selector for Clock/Date (types 3/4).
+    /// Format selector for Clock/Date (types 3/4); badge style for a Departure badge field
+    /// (type 1, fk=0): 0 = filled badge box, 1 = minimal (line label only, no box).
     #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub f: u8,
     /// Icon glyph id (type 6 only): 0 = tram-front, 1 = Z-blind, 2 = arrow.
@@ -276,6 +277,7 @@ impl Layout {
             el.di = el.di.min(2);
             el.fk = el.fk.min(2);
             el.th = el.th.clamp(1, 2);
+            el.f = el.f.min(1);
             if let Some(rgb) = el.col {
                 el.col = Some(rgb & 0x00FF_FFFF);
             }

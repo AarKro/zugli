@@ -218,8 +218,9 @@ simulator.
   - Text/Clock/Date/Station: resizing steps the **font size** (S → M → L…) and, horizontally,
     the **clip/marquee width**.
   - Departure fields: each field (badge / direction / time) is scaled **individually** — its
-    own font size + integer scale (`k`), and the direction field's marquee width. Connected or
-    split, scaling one field never resizes the others.
+    own font size + integer scale (`k`), and the direction field's marquee width. The boxed
+    badge has fixed per-step metrics, so resizing it walks `k` (1×/2×/3×) like an Icon.
+    Connected or split, scaling one field never resizes the others.
   - Divider: horizontal drag changes **length**; vertical is fixed (1–2 px thickness prop).
   - Icon: resizing steps the integer **scale** (1×/2×/3×).
 - **Nudge (critical for phones):** the properties sheet exposes **± arrow buttons** and
@@ -230,9 +231,11 @@ simulator.
   the element's type (§5.4). Common controls: **colour** (see below), **alignment**
   (left/center/right), **font size** (S/M/L) + **scale** (`k`), plus the x/y/w/h + nudges.
   Type-specific controls: Text → text input; Departure field → the "Departure N · Field" label
-  + Split action (§4.5.1); Station → nothing extra (city-stripping is global); Clock/Date →
-  format; Icon → which glyph. Badges and city-stripping still follow the global **Line badges**
-  / **Hide city names** settings — no per-element toggles (§5.4).
+  + Split action (§4.5.1), and the badge field's **style** (`f`: 0 = filled badge box, 1 =
+  minimal — the number in the element colour, no box); Station → nothing extra (city-stripping
+  is global); Clock/Date → format; Icon → which glyph. City-stripping still follows the global
+  **Hide city names** setting; a boxed badge (`f=0`) still follows the global **Line badges**
+  toggle, while the minimal style renders as plain text regardless of it.
 - **Selection indicator (all elements).** The currently-selected element is always clearly
   marked — a highlighted bounding box / outline glow — so it is unambiguous **which element's
   properties sheet is open**. The sheet header names the element (e.g. "Text", "Clock", or
@@ -283,7 +286,9 @@ departure slot (soonest-first: Departure 1, 2, or 3). Up to three Departures may
   drops the Split action.
 - **Rendering follows global config** (badge vs. plain text per **Line badges**; destination
   city-stripping per **Hide city names**) exactly like the built-in board — no per-field content
-  toggles (§5.4). Fields only carry geometry, colour, and scale.
+  toggles (§5.4). Fields only carry geometry, colour, and scale — plus the badge field's style
+  `f` (0 = filled box, honouring **Line badges** and scaled by `k`; 1 = minimal, always the
+  plain line label).
 - **Missing live departure:** if fewer departures are currently live than a placed slot (e.g.
   only two departures but Departure 3 is on the layout), that slot's fields draw nothing until a
   matching departure exists (§9).
@@ -317,14 +322,16 @@ departure slot (soonest-first: Departure 1, 2, or 3). Up to three Departures may
 
 The settings sheet (PB §4.6) has **Hide city names** and **Line badges** toggles that shape
 the built-in board. These are **global** and apply in **every** UI mode — Default, Focus, and
-Custom alike. The custom layout's data-bound elements (Departures, Station) deliberately carry
-**no** per-element overrides for them (§5.4); they read the same global config through the same
-`city()` / `line_badges_enabled()` paths as the built-in board.
+Custom alike. The custom layout's data-bound elements (Departures, Station) read the same
+global config through the same `city()` / `line_badges_enabled()` paths as the built-in board.
+The one per-element choice is the badge field's **style** `f` (§5.4): the default boxed style
+(`f=0`) follows the global toggle, while the minimal style (`f=1`) opts that one element out of
+the box and always draws the plain line label.
 
 - **Hide city names / Line badges:** one setting, one behaviour, everywhere. Toggling them in
   the settings sheet immediately reshapes the Default board, the Focus view, **and** any
-  Departures/Station elements in a custom layout. No special-casing, no "applies only to…"
-  caveat, no confusing dual controls.
+  boxed-style Departures/Station elements in a custom layout. No special-casing beyond the
+  badge style above, no confusing dual controls.
 - **Brightness / auto-dim** are likewise global and **always apply** (they scale the whole
   palette at the render choke point — PB §7.7 / `display::scaled`), in every mode.
 
@@ -386,7 +393,7 @@ All elements share `t` (type), `x`, `y`. Other fields are type-specific and defa
 | `t` | Type | Fields (beyond t,x,y) | Renders as (firmware primitive) |
 |---|---|---|---|
 | `0` | **Text** (static) | `w` (clip/marquee width), `s` (font 0=S,1=M), `k` (scale 1–3), `c` (colour), `a` (align 0=L/1=C/2=R), `v` (literal string) | `draw_marquee` / `left` / `centered` |
-| `1` | **Departure field** (live) | `di` (departure slot 0–2), `fk` (field 0=badge,1=direction,2=time), `w` (direction marquee width), `s`, `k`, `c`/`col`, `a`, `sp` (split: 0=connected,1=split) | `draw_badge` / `draw_marquee` / minutes + `draw_train_front` |
+| `1` | **Departure field** (live) | `di` (departure slot 0–2), `fk` (field 0=badge,1=direction,2=time), `f` (badge style 0=filled box,1=minimal — badge field only), `w` (direction marquee width), `s`, `k` (also scales the boxed badge), `c`/`col`, `a`, `sp` (split: 0=connected,1=split) | `draw_badge_scaled` / `draw_marquee` / minutes + `draw_train_front` |
 | `2` | **Station name** (live) | `w`, `s`, `k`, `c`, `a` — city-stripping follows global config | `draw_marquee` bound to station |
 | `3` | **Clock** (live) | `s`, `k`, `c`, `a`, `f` (format 0=`HH:MM`,1=`H:MM`, …) | `left`/`centered` of formatted time |
 | `4` | **Date** (live) | `s`, `k`, `c`, `a`, `f` (format) | as Clock |

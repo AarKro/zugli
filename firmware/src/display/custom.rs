@@ -23,7 +23,7 @@ use crate::localtime::local_parts;
 use crate::model::{Element, Layout};
 
 use super::draw::{
-    blit_bitmap, blit_cell, city, draw_badge, draw_train_front_scaled, fill_rect, fmt_minutes,
+    blit_bitmap, blit_cell, city, draw_train_front_scaled, fill_rect, fmt_minutes,
     ARROW_GLYPH, Z_GLYPH,
 };
 use super::{marquee_offset, ACCENT, AMBER, COLS, DIM, FBType, MARQUEE_GAP, OFF};
@@ -167,6 +167,18 @@ fn place_text(fb: &mut FBType, text: &str, el: &Element, allow_marquee: bool, fr
     }
 }
 
+/// Draw the fk=0 line label as a filled badge with the digits cut out (unlit), upscaled by the
+/// element's `k` — base metrics match `draw::draw_badge` (FONT_6X10 label, 11 px tall) at `k=1`,
+/// and the JS simulator's `drawBadge` at every scale.
+fn draw_badge_scaled(fb: &mut FBType, line: &str, el: &Element, fill: Color) {
+    let k = (el.k as i32).clamp(1, 3);
+    let (x, y) = (el.x as i32, el.y as i32);
+    let w = (line.chars().count() as i32 * 6 + 5) * k;
+    fill_rect(fb, x, y, w, 11 * k, fill);
+    let style = GlyphStyle { font: &FONT_6X10, k, color: OFF };
+    blit_scaled_text(fb, line, x + 3 * k, y + k, &style, i32::MIN..i32::MAX);
+}
+
 /// Render one live **Departure field** (`t=1`): look up the departure at slot `di` (soonest-first)
 /// and draw its `fk` field (badge / direction / time) at the element's own `x,y`. A missing slot
 /// (fewer live departures than `di+1`) draws nothing. Mirrors the built-in board's per-field logic
@@ -183,10 +195,11 @@ fn draw_dep_field(
     };
     let color = elem_color(el);
     match el.fk {
-        // Badge: a filled badge when line badges are on, else the line as plain (scalable) text.
+        // Badge, per its style `f`: 0 = a filled badge (scaled by `k`) when line badges are on,
+        // else plain text; 1 = minimal — always the line as plain (scalable) text, no box.
         0 => {
-            if crate::shared::line_badges_enabled() {
-                draw_badge(fb, dep.line.as_str(), el.x as i32, el.y as i32, color, OFF);
+            if el.f != 1 && crate::shared::line_badges_enabled() {
+                draw_badge_scaled(fb, dep.line.as_str(), el, color);
                 false
             } else {
                 place_text(fb, dep.line.as_str(), el, true, frame)
