@@ -266,6 +266,124 @@ fn draw_divider(fb: &mut FBType, el: &Element) {
     fill_rect(fb, el.x as i32, el.y as i32, len, th, elem_color(el));
 }
 
+// Weather condition glyphs (8×7, row-major, 1 = lit), one per bucket of WMO weather codes —
+// picked by [`weather_condition_glyph`]. The JS simulator carries identical bitmaps
+// (`WEATHER_GLYPHS` in index.html) so the preview matches the panel pixel-for-pixel.
+const SUN_GLYPH: [[u8; 8]; 7] = [
+    [0, 0, 0, 1, 0, 0, 0, 0],
+    [0, 1, 0, 1, 0, 1, 0, 0],
+    [0, 0, 1, 1, 1, 0, 0, 0],
+    [1, 1, 1, 1, 1, 1, 1, 0],
+    [0, 0, 1, 1, 1, 0, 0, 0],
+    [0, 1, 0, 1, 0, 1, 0, 0],
+    [0, 0, 0, 1, 0, 0, 0, 0],
+];
+const PARTLY_CLOUDY_GLYPH: [[u8; 8]; 7] = [
+    [0, 0, 0, 0, 0, 1, 1, 0],
+    [0, 0, 0, 0, 0, 1, 1, 1],
+    [0, 0, 1, 1, 1, 0, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 0],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+];
+const CLOUD_GLYPH: [[u8; 8]; 7] = [
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 1, 1, 1, 0, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 0],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+];
+const FOG_GLYPH: [[u8; 8]; 7] = [
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 1, 1, 1, 1, 1, 1, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 1, 1, 1, 1, 1, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+];
+const RAIN_GLYPH: [[u8; 8]; 7] = [
+    [0, 0, 1, 1, 1, 0, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 0],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 1, 0, 0, 1, 0, 0, 1],
+    [1, 0, 0, 1, 0, 0, 1, 0],
+];
+const SNOW_GLYPH: [[u8; 8]; 7] = [
+    [0, 0, 1, 1, 1, 0, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 0],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 0, 0, 1, 0, 0, 1, 0],
+    [0, 0, 1, 0, 0, 1, 0, 0],
+];
+const THUNDER_GLYPH: [[u8; 8]; 7] = [
+    [0, 0, 1, 1, 1, 0, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 0],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 1, 1, 0, 0, 0],
+    [0, 0, 1, 1, 0, 0, 0, 0],
+    [0, 1, 1, 0, 0, 0, 0, 0],
+];
+
+/// Horizontal advance from a weather icon to the temperature next to it, in unscaled LEDs
+/// (the 8-column glyph plus a 1-LED gap). The editor's `measureEl` mirrors this.
+const WEATHER_ICON_ADVANCE: u8 = 9;
+
+/// The condition glyph for a WMO weather interpretation code (Open-Meteo `weather_code`):
+/// clear (0–1), partly cloudy (2), overcast (3), fog (45/48), rain incl. drizzle and showers
+/// (51–67, 80–82), snow (71–77, 85–86), thunderstorm (95–99). Unknown codes read as cloud.
+fn weather_condition_glyph(code: u8) -> &'static [[u8; 8]; 7] {
+    match code {
+        0 | 1 => &SUN_GLYPH,
+        2 => &PARTLY_CLOUDY_GLYPH,
+        3 => &CLOUD_GLYPH,
+        45 | 48 => &FOG_GLYPH,
+        51..=67 | 80..=82 => &RAIN_GLYPH,
+        71..=77 | 85 | 86 => &SNOW_GLYPH,
+        95..=99 => &THUNDER_GLYPH,
+        _ => &CLOUD_GLYPH,
+    }
+}
+
+/// Weather element (`t=7`): the current conditions at the tracked stop, per its format `f`
+/// (0 = icon + temperature, 1 = temperature only, 2 = icon only). Draws nothing until the
+/// Open-Meteo fetch has a fresh-enough sample ([`crate::shared::weather`]) — the same
+/// missing-live-data contract as an absent departure slot. Static text, never a marquee.
+fn draw_weather(fb: &mut FBType, el: &Element) -> bool {
+    let Some(w) = crate::shared::weather() else {
+        return false;
+    };
+    let k = (el.k as i32).clamp(1, 3);
+    let show_icon = el.f != 1;
+    let show_temp = el.f != 2;
+    if show_icon {
+        let glyph = weather_condition_glyph(w.code);
+        blit_bitmap(fb, glyph, el.x as i32, el.y as i32, k, elem_color(el));
+    }
+    if show_temp {
+        let mut s: String<8> = String::new();
+        let _ = write!(s, "{}°", w.whole_celsius());
+        // The temperature reuses `place_text` via a shifted copy of the element: natural width,
+        // pinned left (alignment has nothing to align against without a box).
+        let mut text_el = el.clone();
+        if show_icon {
+            text_el.x = el.x.saturating_add(WEATHER_ICON_ADVANCE.saturating_mul(k as u8));
+        }
+        text_el.w = 0;
+        text_el.a = 0;
+        place_text(fb, s.as_str(), &text_el, false, 0);
+    }
+    false
+}
+
 /// Icon element (`t=6`): glyph `g` (0 = tram-front, 1 = Z-blind, 2 = arrow), scaled by `k`.
 fn draw_icon(fb: &mut FBType, el: &Element) {
     let k = (el.k as i32).clamp(1, 3);
@@ -303,6 +421,7 @@ pub(super) fn draw_custom_layout(
                 draw_icon(fb, el); // Icon
                 false
             }
+            7 => draw_weather(fb, el),                           // live Weather
             _ => false, // unknown type: ignore
         };
     }

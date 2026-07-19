@@ -22,6 +22,7 @@ use serde::Deserialize;
 
 use crate::model::{Departure, Departures, DisplayState, Selection};
 use crate::shared::{self, DISPLAY, SELECTION, SELECTION_CHANGED};
+use crate::weather::WeatherPoll;
 
 // TLS record buffers and the HTTP response buffer, allocated once (in PSRAM — see `poll_task`) to
 // keep them off both scarce internal-RAM budgets: the task stack and the DMA-capable internal heap
@@ -104,6 +105,11 @@ pub async fn poll_task(stack: Stack<'static>, seed: u64) {
     // last good board stays up, so a transient hiccup never flashes "offline / reconnecting".
     let mut failing_since: Option<Instant> = None;
 
+    // Weather refresh cadence for the custom layout's Weather element. It shares this task's TCP
+    // client and scratch buffers (fetches run sequentially, so peak stack/RAM stays that of one
+    // fetch) instead of spawning a second task with its own socket state.
+    let mut weather = WeatherPoll::new();
+
     loop {
         let selection = SELECTION.lock().await.clone();
         // How long to wait before the next poll: the normal interval after a good poll or an
@@ -137,7 +143,7 @@ pub async fn poll_task(stack: Stack<'static>, seed: u64) {
                     ),
                 )
                 .await;
-                match attempt {
+                let delay = match attempt {
                     Ok(Ok(deps)) => {
                         info!("poll: {} departures", deps.len());
                         failing_since = None;
@@ -157,7 +163,23 @@ pub async fn poll_task(stack: Stack<'static>, seed: u64) {
                         offline_if_persistent(&mut failing_since);
                         crate::POLL_RETRY_SECS
                     }
-                }
+                };
+                // Refresh the weather for the Weather element (a cheap no-op unless one is live,
+                // the sample is stale, and the stop has coordinates). Run after the stationboard
+                // fetch so departures — the board's core job — always go out first.
+                weather
+                    .refresh_if_due(
+                        &tcp_client,
+                        &dns,
+                        seed,
+                        &mut read_record,
+                        &mut write_record,
+                        &mut http_buf,
+                        sel.lat,
+                        sel.lon,
+                    )
+                    .await;
+                delay
             }
         };
 

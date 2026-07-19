@@ -146,7 +146,7 @@ Opens as a full-viewport overlay (same overlay/z-index machinery as the settings
    small but have an enlarged invisible hit area (≥ 32–44 px) so they're tappable on a phone.
 4. **Bottom bar / palette:**
    - When **nothing** is selected: a horizontally-scrollable **element palette** (chips:
-     Text, Departure, Clock, Date, Station, Divider, Icon) plus a persistent **"+ Add"**
+     Text, Departure, Clock, Date, Station, Divider, Icon, Weather) plus a persistent **"+ Add"**
      affordance. Tapping a chip adds that element (see §4.4). The **Departure** chip adds a
      three-field group, not a single element (§4.4).
    - When **an element is selected**: a **properties sheet** (see §4.5) with a **Delete**
@@ -399,6 +399,7 @@ All elements share `t` (type), `x`, `y`. Other fields are type-specific and defa
 | `4` | **Date** (live) | `s`, `k`, `c`, `a`, `f` (format) | as Clock |
 | `5` | **Divider** (rule) | `w` (length), `th` (thickness 1–2), `c` | `rule` / `Line` |
 | `6` | **Icon** | `k` (scale 1–3), `c`, `g` (glyph id: 0=tram-front,1=Z-blind,2=arrow) | `draw_train_front` / glyph blitter |
+| `7` | **Weather** (live) | `s`, `k`, `c`/`col`, `f` (format 0=icon+temperature, 1=temperature only, 2=icon only) | condition glyph blitter + `place_text` of `N°` |
 
 Notes:
 - **Departure field (`t=1`) — the group model.** A **Departure** is three `t=1` elements
@@ -432,9 +433,19 @@ Notes:
   for layout/marquee/clip math scale accordingly (advance = `char_w × k`, height = `font_h ×
   k`). The simulator implements the **identical** blitter so WYSIWYG holds glyph-for-glyph.
   Applies to every text-bearing type (Text, each Departure field, Station, Clock, Date).
-- **Data binding** is implicit in the type: types `1–4` pull from live runtime data at draw
-  time (a Departure field → its slot's line/destination/minutes, station name, `now_unix`);
-  types `0,5,6` are static.
+- **Data binding** is implicit in the type: types `1–4` and `7` pull from live runtime data at
+  draw time (a Departure field → its slot's line/destination/minutes, station name, `now_unix`,
+  the shared weather mirror); types `0,5,6` are static.
+- **Weather (`t=7`) data source.** The firmware fetches the **current weather at the saved stop**
+  from **Open-Meteo** (`api.open-meteo.com/v1/forecast`, `current=temperature_2m,weather_code`,
+  no key), piggybacked on the runtime poll loop (`weather.rs`): refreshed every ~15 min, and
+  **only while a live layout/preview actually contains a Weather element**. Coordinates come from
+  the stop selection — the config page captures the locations API's WGS84 `coordinate` into new
+  optional `Selection.lat`/`lon` fields (older saves without them draw nothing until re-saved).
+  The WMO `weather_code` maps to one of seven 8×7 condition glyphs (clear / partly cloudy /
+  overcast / fog / rain / snow / thunder), mirrored pixel-for-pixel in the JS simulator; the
+  temperature renders as whole °C (`19°`). No sample yet, or a sample older than ~3 h, draws
+  nothing — the same missing-live-data contract as an absent departure slot (§9).
 
 ### 5.5 Bounds & validation (enforced on **both** phone and firmware)
 - **`LAYOUT_MAX_BYTES` — the authoritative flash bound (recommend 1536).** A layout is valid

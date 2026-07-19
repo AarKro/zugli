@@ -41,6 +41,14 @@ pub struct Selection {
     /// mode. `#[serde(default)]` keeps older flash records loading (they had no such field).
     #[serde(default)]
     pub connections: Vec<Conn, MAX_CONNS>,
+    /// WGS84 latitude of the stop (the locations API's `coordinate.x`), captured by the config
+    /// page when the stop is picked. Feeds the Open-Meteo fetch behind the custom layout's
+    /// Weather element. `None` on older saves (the widget then draws nothing until a re-save).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lat: Option<f32>,
+    /// WGS84 longitude of the stop (the locations API's `coordinate.y`); see [`lat`](Self::lat).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lon: Option<f32>,
 }
 
 /// Home WiFi credentials entered during provisioning (brief §5).
@@ -208,7 +216,8 @@ impl Default for Layout {
 /// the common case compact for the flash budget. Type-specific fields are ignored by other types.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Element {
-    /// Type tag: 0=Text, 1=Departure field, 2=Station, 3=Clock, 4=Date, 5=Divider, 6=Icon.
+    /// Type tag: 0=Text, 1=Departure field, 2=Station, 3=Clock, 4=Date, 5=Divider, 6=Icon,
+    /// 7=Weather.
     pub t: u8,
     /// Top-left x (0..=63; baseline-top origin for text).
     #[serde(default, skip_serializing_if = "is_zero_u8")]
@@ -250,7 +259,8 @@ pub struct Element {
     /// Divider thickness, 1..=2 (type 5 only).
     #[serde(default = "one_u8", skip_serializing_if = "is_one_u8")]
     pub th: u8,
-    /// Format selector for Clock/Date (types 3/4); badge style for a Departure badge field
+    /// Format selector for Clock/Date (types 3/4) and Weather (type 7: 0 = icon + temperature,
+    /// 1 = temperature only, 2 = icon only); badge style for a Departure badge field
     /// (type 1, fk=0): 0 = filled badge box, 1 = minimal (line label only, no box).
     #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub f: u8,
@@ -277,11 +287,37 @@ impl Layout {
             el.di = el.di.min(2);
             el.fk = el.fk.min(2);
             el.th = el.th.clamp(1, 2);
-            el.f = el.f.min(1);
+            // `f` is a 2-way selector everywhere except the Weather element's 3-way format.
+            el.f = el.f.min(if el.t == 7 { 2 } else { 1 });
             if let Some(rgb) = el.col {
                 el.col = Some(rgb & 0x00FF_FFFF);
             }
         }
+    }
+
+    /// Whether any element is a Weather element (`t == 7`). Gates the Open-Meteo fetch
+    /// ([`crate::shared::weather_element_active`]), so the board only polls weather while a
+    /// layout actually shows it.
+    pub fn has_weather_element(&self) -> bool {
+        self.e.iter().any(|el| el.t == 7)
+    }
+}
+
+/// Current weather at the tracked stop, fetched from Open-Meteo (see [`crate::weather`]) and
+/// mirrored for the render task via [`crate::shared::set_weather`].
+#[derive(Clone, Copy, Debug)]
+pub struct Weather {
+    /// Air temperature in tenths of a °C (e.g. `185` = 18.5 °C), rounded from the API value.
+    pub deci_celsius: i16,
+    /// WMO weather interpretation code (Open-Meteo `weather_code`), mapped to a glyph at draw.
+    pub code: u8,
+}
+
+impl Weather {
+    /// The temperature rounded to whole °C, half away from zero (185 → 19, -185 → -19). The JS
+    /// simulator's `drawWeather` mirrors this exactly so both surfaces show the same number.
+    pub fn whole_celsius(&self) -> i16 {
+        (self.deci_celsius + if self.deci_celsius >= 0 { 5 } else { -5 }) / 10
     }
 }
 
